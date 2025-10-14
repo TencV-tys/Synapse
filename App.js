@@ -1,3 +1,4 @@
+// Updated App.js with all screens
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -9,7 +10,8 @@ import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import NotesScreen from './src/screens/NotesScreen';
-import ChatScreen from './src/screens/ChatScreen';
+import NoteEditorScreen from './src/screens/NoteEditorScreen';
+import ChatScreen from './src/screens/ChatScreen'; // Now this exists
 
 const Stack = createStackNavigator();
 
@@ -23,6 +25,7 @@ export default function App() {
             <Stack.Screen name="Register" component={RegisterScreen} />
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="Notes" component={NotesScreen} />
+            <Stack.Screen name="NoteEditor" component={NoteEditorScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
           </Stack.Navigator>
         </NavigationContainer>
