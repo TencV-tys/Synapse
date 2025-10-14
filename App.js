@@ -9,6 +9,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import NotesScreen from './src/screens/NotesScreen';
+import NoteEditorScreen from './src/screens/NoteEditorScreen';
 import ChatScreen from './src/screens/ChatScreen';
 
 const Stack = createStackNavigator();
@@ -23,6 +24,7 @@ export default function App() {
             <Stack.Screen name="Register" component={RegisterScreen} />
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="Notes" component={NotesScreen} />
+            <Stack.Screen name="NoteEditor" component={NoteEditorScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
           </Stack.Navigator>
         </NavigationContainer>
