@@ -16,16 +16,36 @@ export const AuthProvider = ({ children }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       
+      console.log('🔥 Firebase auth state changed:', firebaseUser);
+      
       if (firebaseUser) {
         try {
           // Get additional user data from Firestore
+          console.log('📡 Fetching user data from Firestore for:', firebaseUser.uid);
           const userData = await authService.getCurrentUser(firebaseUser.uid);
-          setUser({ ...firebaseUser, ...userData });
+          console.log('✅ User data from Firestore:', userData);
+          
+          // Merge Firebase user with Firestore data
+          const mergedUser = {
+            // Firebase auth data
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            emailVerified: firebaseUser.emailVerified,
+            displayName: firebaseUser.displayName,
+            
+            // Firestore user data (this should include 'name')
+            ...userData
+          };
+          
+          console.log('👤 Final merged user:', mergedUser);
+          setUser(mergedUser);
         } catch (error) {
-          console.error('Error fetching user data:', error);
-          setUser(null);
+          console.error('❌ Error fetching user data from Firestore:', error);
+          // Fallback to just Firebase user data
+          setUser(firebaseUser);
         }
       } else {
+        console.log('🚪 No user logged in');
         setUser(null);
       }
       

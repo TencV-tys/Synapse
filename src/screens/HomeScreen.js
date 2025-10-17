@@ -8,10 +8,14 @@ const HomeScreen = ({ navigation }) => {
   const { notes, pinnedNotes } = useNotes();
   const { user } = useAuth();
 
+  console.log('🏠 HomeScreen - Current user:', user);
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.welcome}>Welcome back, {user?.name}!</Text>
+        <Text style={styles.welcome}>
+          Welcome back, {user?.name || user?.displayName || 'User'}!
+        </Text>
         <Text style={styles.subtitle}>Your knowledge hub</Text>
       </View>
 
@@ -28,7 +32,7 @@ const HomeScreen = ({ navigation }) => {
 
       <TouchableOpacity 
         style={styles.quickAction}
-        onPress={() => navigation.navigate('Notes', { screen: 'CreateNote' })}
+        onPress={() => navigation.navigate('Notes')}
       >
         <Text style={styles.quickActionText}>+ Create New Note</Text>
       </TouchableOpacity>
@@ -40,11 +44,11 @@ const HomeScreen = ({ navigation }) => {
             <TouchableOpacity 
               key={note.id} 
               style={styles.noteCard}
-              onPress={() => navigation.navigate('Notes', { note })}
+              onPress={() => navigation.navigate('NoteEditor', { note })}
             >
               <Text style={styles.noteTitle}>{note.title}</Text>
               <Text style={styles.notePreview}>
-                {note.content.substring(0, 100)}...
+                {note.content?.substring(0, 100)}...
               </Text>
             </TouchableOpacity>
           ))}
