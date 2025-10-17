@@ -12,12 +12,18 @@ export const NotesProvider = ({ children }) => {
 
   // Real-time subscription to user notes
   useEffect(() => {
+    console.log('🔄 NotesContext: User changed', user ? user.uid : 'No user');
+    
     if (!user) {
+      console.log('❌ No user, clearing notes');
       setNotes([]);
       return;
     }
 
+    console.log('🔥 Setting up Firebase listener for user:', user.uid);
+    
     const unsubscribe = notesService.subscribeToUserNotes(user.uid, (userNotes) => {
+      console.log('✅ Firebase returned notes:', userNotes.length, 'notes');
       setNotes(userNotes);
     });
 
@@ -29,8 +35,13 @@ export const NotesProvider = ({ children }) => {
     
     setLoading(true);
     try {
+      console.log('💾 Creating note:', noteData);
       const newNote = await notesService.createNote(noteData, user.uid);
+      console.log('✅ Note created successfully:', newNote);
       return newNote;
+    } catch (error) {
+      console.error('❌ Error creating note:', error);
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -39,7 +50,12 @@ export const NotesProvider = ({ children }) => {
   const updateNote = async (id, updates) => {
     setLoading(true);
     try {
+      console.log('📝 Updating note:', id, updates);
       await notesService.updateNote(id, updates);
+      console.log('✅ Note updated successfully');
+    } catch (error) {
+      console.error('❌ Error updating note:', error);
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -48,7 +64,12 @@ export const NotesProvider = ({ children }) => {
   const deleteNote = async (id) => {
     setLoading(true);
     try {
+      console.log('🗑️ Deleting note:', id);
       await notesService.deleteNote(id);
+      console.log('✅ Note deleted successfully');
+    } catch (error) {
+      console.error('❌ Error deleting note:', error);
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -57,6 +78,7 @@ export const NotesProvider = ({ children }) => {
   const togglePin = async (id) => {
     const note = notes.find(note => note.id === id);
     if (note) {
+      console.log('📌 Toggling pin for note:', id, 'Current:', note.isPinned);
       await updateNote(id, { isPinned: !note.isPinned });
     }
   };
@@ -64,19 +86,23 @@ export const NotesProvider = ({ children }) => {
   const toggleFavorite = async (id) => {
     const note = notes.find(note => note.id === id);
     if (note) {
+      console.log('⭐ Toggling favorite for note:', id, 'Current:', note.isFavorite);
       await updateNote(id, { isFavorite: !note.isFavorite });
     }
   };
 
-  const searchNotes = async (query) => {
-    if (!user) return [];
+  // FIXED: Search function that doesn't cause state updates during render
+  const searchNotes = (query) => {
+    if (!user || !query.trim()) return notes;
     
-    setLoading(true);
-    try {
-      return await notesService.searchNotes(user.uid, query);
-    } finally {
-      setLoading(false);
-    }
+    console.log('🔍 Searching notes for:', query);
+    return notes.filter(note =>
+      note.title.toLowerCase().includes(query.toLowerCase()) ||
+      note.content.toLowerCase().includes(query.toLowerCase()) ||
+      (note.tags && note.tags.some(tag => 
+        tag.toLowerCase().includes(query.toLowerCase())
+      ))
+    );
   };
 
   const getPinnedNotes = () => notes.filter(note => note.isPinned);

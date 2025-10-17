@@ -1,13 +1,19 @@
 // src/screens/NotesScreen.js
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { useNotes } from '../context/NotesContext';
+import { useAuth } from '../context/AuthContext';
 
 const NotesScreen = ({ navigation }) => {
-  const { notes, createNote, updateNote, deleteNote, togglePin, searchNotes } = useNotes();
+  const { notes, createNote, updateNote, deleteNote, togglePin, searchNotes, loading } = useNotes();
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState('all');
 
+  // Debug logs
+  console.log('📱 NotesScreen rendering with notes:', notes.length);
+  console.log('📱 Current user:', user);
+
+  // FIXED: Use the synchronous search function
   const filteredNotes = searchQuery ? searchNotes(searchQuery) : notes;
 
   const NoteCard = ({ note }) => (
@@ -18,7 +24,7 @@ const NotesScreen = ({ navigation }) => {
       <View style={styles.noteHeader}>
         <Text style={styles.noteTitle}>{note.title}</Text>
         <TouchableOpacity onPress={() => togglePin(note.id)}>
-          <Text style={styles.pinIcon}>{note.pinned ? '📌' : '📍'}</Text>
+          <Text style={styles.pinIcon}>{note.isPinned ? '📌' : '📍'}</Text>
         </TouchableOpacity>
       </View>
       <Text style={styles.noteContent} numberOfLines={3}>
@@ -32,6 +38,15 @@ const NotesScreen = ({ navigation }) => {
     </TouchableOpacity>
   );
 
+  if (loading && notes.length === 0) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#6366f1" />
+        <Text style={styles.loadingText}>Loading your notes...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.searchContainer}>
@@ -43,12 +58,21 @@ const NotesScreen = ({ navigation }) => {
         />
       </View>
 
-      <FlatList
-        data={filteredNotes}
-        renderItem={({ item }) => <NoteCard note={item} />}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.notesList}
-      />
+      {notes.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>No notes yet</Text>
+          <Text style={styles.emptyText}>
+            Create your first note by tapping the + button below!
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredNotes}
+          renderItem={({ item }) => <NoteCard note={item} />}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.notesList}
+        />
+      )}
 
       <TouchableOpacity 
         style={styles.fab}
@@ -118,6 +142,35 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   fabText: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: '#333',
+  },
+  emptyText: {
+    fontSize: 16,
+    textAlign: 'center',
+    color: '#666',
+    lineHeight: 24,
+  },
 });
 
 export default NotesScreen;
