@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { useNotes } from '../context/NotesContext';
 import { useAuth } from '../context/AuthContext';
-
+ 
 const NotesScreen = ({ navigation }) => {
   const { notes, createNote, updateNote, deleteNote, togglePin, searchNotes, loading } = useNotes();
   const { user } = useAuth();

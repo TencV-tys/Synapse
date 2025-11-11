@@ -7,23 +7,21 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, firestore } from '../config/firebase';
+import sqliteService from './sqliteService';
 
 export const authService = {
-  // Register new user
   async register(userData) {
     try {
       const { email, password, name, userType } = userData;
       
-      // Create authentication account
+      console.log('👤 Registering user:', email);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Update profile with display name
       await updateProfile(user, {
         displayName: name
       });
 
-      // Create user document in Firestore
       const userDoc = {
         uid: user.uid,
         email: user.email,
@@ -34,53 +32,75 @@ export const authService = {
       };
 
       await setDoc(doc(firestore, 'users', user.uid), userDoc);
-
+      
+      // Save to SQLite
+      await sqliteService.saveUser(userDoc);
+      
+      console.log('✅ User registered and saved to SQLite:', user.uid);
       return userDoc;
     } catch (error) {
       throw new Error(this.getAuthErrorMessage(error.code));
     }
   },
 
-  // Login user
   async login(email, password) {
     try {
+      console.log('🔐 Logging in user:', email);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Update last login
       const userRef = doc(firestore, 'users', user.uid);
       await setDoc(userRef, {
         lastLogin: new Date().toISOString()
       }, { merge: true });
 
-      // Get user data
       const userDoc = await getDoc(userRef);
-      return userDoc.exists() ? userDoc.data() : null;
+      const userData = userDoc.exists() ? userDoc.data() : null;
+
+      // Save to SQLite
+      if (userData) {
+        await sqliteService.saveUser(userData);
+      }
+
+      console.log('✅ User logged in and saved to SQLite:', user.uid);
+      return userData;
     } catch (error) {
       throw new Error(this.getAuthErrorMessage(error.code));
     }
   },
 
-  // Logout user
+  async getCurrentUser(uid) {
+    try {
+      // Try Firebase first
+      const userDoc = await getDoc(doc(firestore, 'users', uid));
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        // Save to SQLite
+        await sqliteService.saveUser(userData);
+        return userData;
+      } else {
+        // Fallback to SQLite
+        console.log('🔍 User not in Firebase, checking SQLite...');
+        return await sqliteService.getUser(uid);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching from Firebase, trying SQLite:', error);
+      // Fallback to SQLite
+      return await sqliteService.getUser(uid);
+    }
+  },
+
   async logout() {
     try {
       await signOut(auth);
+      console.log('✅ User logged out');
     } catch (error) {
-      throw new Error('Logout failed. Please try again.');
+      console.error('❌ Error during logout:', error);
+      throw error;
     }
   },
 
-  // Get current user data
-  async getCurrentUser(uid) {
-    try {
-      const userDoc = await getDoc(doc(firestore, 'users', uid));
-      return userDoc.exists() ? userDoc.data() : null;
-    } catch (error) {
-      throw new Error('Failed to fetch user data.');
-    }
-  },
-
-  // Error message helper
   getAuthErrorMessage(errorCode) {
     const errorMessages = {
       'auth/email-already-in-use': 'This email is already registered.',
@@ -95,4 +115,4 @@ export const authService = {
 
     return errorMessages[errorCode] || 'An unexpected error occurred.';
   }
-};
+}; 
