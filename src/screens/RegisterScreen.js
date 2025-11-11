@@ -1,4 +1,4 @@
-// src/screens/RegisterScreen.js
+// src/screens/RegisterScreen.js - Updated with password toggle
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, ActivityIndicator } from 'react-native';
 import { useAuth } from '../context/AuthContext';
@@ -11,6 +11,8 @@ const RegisterScreen = ({ navigation }) => {
     confirmPassword: '',
     userType: 'student'
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { register, authLoading } = useAuth();
 
   const handleRegister = async () => {
@@ -31,10 +33,12 @@ const RegisterScreen = ({ navigation }) => {
       return;
     }
 
+    console.log('👤 Attempting registration for:', email);
     const result = await register({ name, email, password, userType });
     
     if (result.success) {
-      navigation.replace('Home');
+      console.log('✅ Registration successful - RootNavigator will handle navigation');
+      // RootNavigator automatically handles navigation based on auth state
     } else {
       Alert.alert('Registration Failed', result.error);
     }
@@ -42,6 +46,14 @@ const RegisterScreen = ({ navigation }) => {
 
   const updateFormData = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
+  const toggleConfirmPasswordVisibility = () => {
+    setShowConfirmPassword(!showConfirmPassword);
   };
 
   return (
@@ -68,21 +80,41 @@ const RegisterScreen = ({ navigation }) => {
           keyboardType="email-address"
         />
         
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          value={formData.password}
-          onChangeText={(value) => updateFormData('password', value)}
-          secureTextEntry
-        />
-        
-        <TextInput
-          style={styles.input}
-          placeholder="Confirm Password"
-          value={formData.confirmPassword}
-          onChangeText={(value) => updateFormData('confirmPassword', value)}
-          secureTextEntry
-        />
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={styles.passwordInput}
+            placeholder="Password"
+            value={formData.password}
+            onChangeText={(value) => updateFormData('password', value)}
+            secureTextEntry={!showPassword}
+          />
+          <TouchableOpacity 
+            style={styles.eyeIcon}
+            onPress={togglePasswordVisibility}
+          >
+            <Text style={styles.eyeIconText}>
+              {showPassword ? '👁️' : '👁️‍🗨️'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={styles.passwordInput}
+            placeholder="Confirm Password"
+            value={formData.confirmPassword}
+            onChangeText={(value) => updateFormData('confirmPassword', value)}
+            secureTextEntry={!showConfirmPassword}
+          />
+          <TouchableOpacity 
+            style={styles.eyeIcon}
+            onPress={toggleConfirmPasswordVisibility}
+          >
+            <Text style={styles.eyeIconText}>
+              {showConfirmPassword ? '👁️' : '👁️‍🗨️'}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.userTypeContainer}>
           <Text style={styles.userTypeLabel}>I am a:</Text>
@@ -169,6 +201,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+  },
+  passwordContainer: {
+    position: 'relative',
+    marginBottom: 15,
+  },
+  passwordInput: {
+    backgroundColor: '#f8fafc',
+    padding: 15,
+    borderRadius: 10,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingRight: 50, // Make space for the eye icon
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: 15,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 30,
+  },
+  eyeIconText: {
+    fontSize: 18,
   },
   userTypeContainer: {
     marginBottom: 20,

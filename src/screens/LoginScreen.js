@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const { login, authLoading } = useAuth();
 
   const handleLogin = async () => {
@@ -14,13 +15,20 @@ const LoginScreen = ({ navigation }) => {
       return;
     }
 
+    console.log('🔐 Attempting login for:', email);
     const result = await login(email, password);
     
     if (result.success) {
-      navigation.replace('Home');
+      console.log('✅ Login successful - RootNavigator will handle navigation');
+      // RootNavigator automatically handles navigation based on auth state
     } else {
       Alert.alert('Login Failed', result.error);
+      setPassword(''); // Clear password on error
     }
+  };
+
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
   };
 
   return (
@@ -40,13 +48,23 @@ const LoginScreen = ({ navigation }) => {
           keyboardType="email-address"
         />
         
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={styles.passwordInput}
+            placeholder="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+          />
+          <TouchableOpacity 
+            style={styles.eyeIcon}
+            onPress={togglePasswordVisibility}
+          >
+            <Text style={styles.eyeIconText}>
+              {showPassword ? '👁️' : '👁️‍🗨️'}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity 
           style={styles.loginButton} 
@@ -112,6 +130,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+  },
+  passwordContainer: {
+    position: 'relative',
+    marginBottom: 15,
+  },
+  passwordInput: {
+    backgroundColor: '#f8fafc',
+    padding: 15,
+    borderRadius: 10,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingRight: 50, // Make space for the eye icon
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: 15,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 30,
+  },
+  eyeIconText: {
+    fontSize: 18,
   },
   loginButton: {
     backgroundColor: '#6366f1',

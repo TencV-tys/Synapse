@@ -1,8 +1,8 @@
-// App.js - Fixed with proper imports
+// App.js
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { View, Text, ActivityIndicator } from 'react-native'; // Add these imports
+import { View, Text, ActivityIndicator } from 'react-native';
 import { NotesProvider } from './src/context/NotesContext';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 
@@ -24,7 +24,7 @@ const LoadingScreen = () => (
   </View>
 );
 
-// Separate navigators for authenticated vs unauthenticated
+// Unauthenticated stack (login/register)
 const AuthStack = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="Login" component={LoginScreen} />
@@ -32,15 +32,51 @@ const AuthStack = () => (
   </Stack.Navigator>
 );
 
+// Authenticated stack (main app)
 const AppStack = () => (
-  <Stack.Navigator>
-    <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Synapse' }} />
-    <Stack.Screen name="Notes" component={NotesScreen} options={{ title: 'My Notes' }} />
-    <Stack.Screen name="NoteEditor" component={NoteEditorScreen} options={{ title: 'Edit Note' }} />
-    <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'Chat' }} />
+  <Stack.Navigator
+    screenOptions={{
+      headerStyle: { backgroundColor: '#6366f1' },
+      headerTintColor: '#fff',
+      headerTitleStyle: { fontWeight: 'bold' },
+    }}
+  >
+    <Stack.Screen 
+      name="Home" 
+      component={HomeScreen} 
+      options={{ 
+        title: 'Synapse',
+        headerShown: false
+      }} 
+    />
+    <Stack.Screen 
+      name="Notes" 
+      component={NotesScreen} 
+      options={{ 
+        title: 'My Notes',
+        headerBackTitle: 'Back'
+      }} 
+    />
+    <Stack.Screen 
+      name="NoteEditor" 
+      component={NoteEditorScreen} 
+      options={{ 
+        title: 'Edit Note',
+        headerBackTitle: 'Back'
+      }} 
+    />
+    <Stack.Screen 
+      name="Chat" 
+      component={ChatScreen} 
+      options={{ 
+        title: 'Chat',
+        headerBackTitle: 'Back'
+      }} 
+    />
   </Stack.Navigator>
 );
 
+// Root navigator that handles auth state
 const RootNavigator = () => {
   const { user, loading } = useAuth();
 
@@ -55,10 +91,12 @@ const RootNavigator = () => {
     return <LoadingScreen />;
   }
 
+  // Show app if user is authenticated, auth stack if not
   console.log('🎯 Navigation decision:', user ? 'APP (authenticated)' : 'AUTH (not authenticated)');
   return user ? <AppStack /> : <AuthStack />;
 };
 
+// Main App component
 export default function App() {
   return (
     <AuthProvider>
@@ -66,7 +104,7 @@ export default function App() {
         <NavigationContainer>
           <RootNavigator />
         </NavigationContainer>
-      </NotesProvider> 
+      </NotesProvider>
     </AuthProvider>
   );
 }
