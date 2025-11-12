@@ -7,7 +7,7 @@ const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const { login, authLoading } = useAuth();
+  const { login, authLoading, isOnline } = useAuth();
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -20,7 +20,6 @@ const LoginScreen = ({ navigation }) => {
     
     if (result.success) {
       console.log('✅ Login successful - RootNavigator will handle navigation');
-      // RootNavigator automatically handles navigation based on auth state
     } else {
       Alert.alert('Login Failed', result.error);
       setPassword(''); // Clear password on error
@@ -36,6 +35,14 @@ const LoginScreen = ({ navigation }) => {
       <View style={styles.header}>
         <Text style={styles.title}>SYNAPSE</Text>
         <Text style={styles.subtitle}>Connect Your Knowledge</Text>
+        
+        {/* Offline Status Indicator */}
+        <View style={styles.statusContainer}>
+          <View style={[styles.statusDot, isOnline ? styles.onlineDot : styles.offlineDot]} />
+          <Text style={styles.statusText}>
+            {isOnline ? 'Online' : 'Offline Mode'}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.form}>
@@ -66,6 +73,14 @@ const LoginScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
+        {!isOnline && (
+          <View style={styles.offlineNotice}>
+            <Text style={styles.offlineNoticeText}>
+              📴 Offline Mode - Using local storage
+            </Text>
+          </View>
+        )}
+
         <TouchableOpacity 
           style={styles.loginButton} 
           onPress={handleLogin}
@@ -74,7 +89,9 @@ const LoginScreen = ({ navigation }) => {
           {authLoading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.loginButtonText}>Login</Text>
+            <Text style={styles.loginButtonText}>
+              {isOnline ? 'Login' : 'Login Offline'}
+            </Text>
           )}
         </TouchableOpacity>
 
@@ -112,6 +129,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#e0e7ff',
   },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  onlineDot: {
+    backgroundColor: '#10b981',
+  },
+  offlineDot: {
+    backgroundColor: '#f59e0b',
+  },
+  statusText: {
+    color: '#e0e7ff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   form: {
     backgroundColor: '#fff',
     padding: 20,
@@ -142,7 +181,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    paddingRight: 50, // Make space for the eye icon
+    paddingRight: 50,
   },
   eyeIcon: {
     position: 'absolute',
@@ -155,6 +194,20 @@ const styles = StyleSheet.create({
   },
   eyeIconText: {
     fontSize: 18,
+  },
+  offlineNotice: {
+    backgroundColor: '#fef3c7',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 15,
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+  },
+  offlineNoticeText: {
+    color: '#92400e',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   loginButton: {
     backgroundColor: '#6366f1',

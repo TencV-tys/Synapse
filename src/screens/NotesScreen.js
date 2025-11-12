@@ -482,4 +482,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default NotesScreen;
+export default NotesScreen; 

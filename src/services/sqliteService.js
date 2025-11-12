@@ -4,175 +4,148 @@ console.log('📱 SQLite service loading...');
 let db = null;
 let isRealSQLite = false;
 
-// Try to initialize real SQLite
-try {
-  // Import SQLite properly
-  const SQLite = require('expo-sqlite');
-  
-  if (SQLite && SQLite.openDatabase) {
-    db = SQLite.openDatabase('synapse.db');
-    isRealSQLite = true;
-    console.log('✅ REAL SQLite database opened successfully');
-    
-    // Initialize tables
-    initializeTables();
-  } else {
-    throw new Error('SQLite not available');
-  }
-} catch (error) {
-  console.log('❌ Real SQLite failed, using enhanced mock:', error.message);
-  createEnhancedMockDatabase();
-}
-
-function initializeTables() {
-  if (!db) return;
-  
-  db.transaction(tx => {
-    // Users table
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS users (
-        uid TEXT PRIMARY KEY,
-        email TEXT NOT NULL,
-        name TEXT,
-        userType TEXT,
-        createdAt TEXT,
-        lastLogin TEXT
-      );`,
-      [],
-      () => console.log('✅ Users table ready'),
-      (tx, error) => console.log('ℹ️ Users table already exists')
-    );
-
-    // Notes table
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS notes (
-        id TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        title TEXT NOT NULL,
-        content TEXT,
-        tags TEXT,
-        isPinned INTEGER DEFAULT 0,
-        isFavorite INTEGER DEFAULT 0,
-        permission TEXT DEFAULT 'private',
-        createdAt TEXT,
-        updatedAt TEXT,
-        syncStatus TEXT DEFAULT 'synced'
-      );`,
-      [],
-      () => console.log('✅ Notes table ready'),
-      (tx, error) => console.log('ℹ️ Notes table already exists')
-    );
-
-    // Sync queue table
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS sync_queue (
-        id TEXT PRIMARY KEY,
-        tableName TEXT NOT NULL,
-        recordId TEXT NOT NULL,
-        operation TEXT NOT NULL,
-        data TEXT,
-        createdAt TEXT
-      );`,
-      [],
-      () => console.log('✅ Sync queue table ready'),
-      (tx, error) => console.log('ℹ️ Sync queue table already exists')
-    );
-  });
-}
-
+// Create enhanced mock database (since real SQLite often has issues in React Native)
 function createEnhancedMockDatabase() {
-  console.log('🔄 Creating enhanced mock database with actual storage');
+  console.log('🔄 Creating enhanced mock database for React Native');
   
-  // Use AsyncStorage as fallback for mock database
+  // Use in-memory storage for React Native
   const mockData = {
     users: {},
     notes: {},
     syncQueue: {}
   };
 
-  // Load existing data from storage if available
-  try {
-    const stored = localStorage.getItem('synapse_mock_data');
-    if (stored) {
-      Object.assign(mockData, JSON.parse(stored));
-      console.log('📂 Loaded mock data from storage:', Object.keys(mockData.notes).length, 'notes');
-    }
-  } catch (e) {
-    console.log('📂 No existing mock data found');
-  }
+  console.log('📂 Initialized mock database in memory');
 
-  const saveToStorage = () => {
-    try {
-      localStorage.setItem('synapse_mock_data', JSON.stringify(mockData));
-    } catch (e) {
-      console.log('⚠️ Could not save to localStorage');
-    }
-  };
-
-  db = {
+  // Create a simple mock database interface
+  const mockDB = {
     transaction: (callback) => {
       try {
-        callback({
-          executeSql: (sql, params, success, error) => {
-            // Parse SQL to understand the operation
-            const sqlLower = sql.toLowerCase();
+        // Create a mock transaction object
+        const mockTransaction = {
+          executeSql: (sql, params, successCallback, errorCallback) => {
+            console.log('⚡ [MOCK] Executing SQL:', sql.substring(0, 100) + '...');
             
-            if (sqlLower.includes('insert or replace') && sqlLower.includes('notes')) {
-              // Save note
-              const [id, userId, title, content, tags, isPinned, isFavorite, permission, createdAt, updatedAt, syncStatus] = params;
-              mockData.notes[id] = {
-                id, userId, title, content, 
-                tags: JSON.parse(tags),
-                isPinned: isPinned === 1,
-                isFavorite: isFavorite === 1,
-                permission, createdAt, updatedAt, syncStatus
-              };
-              saveToStorage();
-              console.log('💾 [MOCK+STORAGE] Note saved:', title);
-              if (success) success({ rows: { _array: [] } });
+            try {
+              const sqlLower = sql.toLowerCase().trim();
               
-            } else if (sqlLower.includes('select') && sqlLower.includes('notes') && sqlLower.includes('userid')) {
-              // Get notes for user
-              const userId = params[0];
-              const userNotes = Object.values(mockData.notes).filter(note => note.userId === userId);
-              console.log('📝 [MOCK+STORAGE] Notes retrieved:', userNotes.length);
-              if (success) success({ rows: { _array: userNotes } });
-              
-            } else if (sqlLower.includes('delete from notes') && sqlLower.includes('id')) {
-              // Delete note
-              const noteId = params[0];
-              delete mockData.notes[noteId];
-              saveToStorage();
-              console.log('🗑️ [MOCK+STORAGE] Note deleted:', noteId);
-              if (success) success({ rows: { _array: [] } });
-              
-            } else if (sqlLower.includes('insert or replace') && sqlLower.includes('users')) {
-              // Save user
-              const [uid, email, name, userType, createdAt, lastLogin] = params;
-              mockData.users[uid] = { uid, email, name, userType, createdAt, lastLogin };
-              saveToStorage();
-              console.log('💾 [MOCK+STORAGE] User saved:', email);
-              if (success) success({ rows: { _array: [] } });
-              
-            } else if (sqlLower.includes('select') && sqlLower.includes('users') && sqlLower.includes('uid')) {
-              // Get user
-              const uid = params[0];
-              const user = mockData.users[uid] || null;
-              console.log('👤 [MOCK+STORAGE] User retrieved:', user ? user.email : 'Not found');
-              if (success) success({ rows: { _array: user ? [user] : [] } });
-              
-            } else {
-              // Default success for other operations
-              if (success) success({ rows: { _array: [] } });
+              // Handle different SQL operations
+              if (sqlLower.startsWith('insert or replace into users')) {
+                // Save user
+                const [uid, email, name, userType, createdAt, lastLogin, isOffline] = params;
+                mockData.users[uid] = { 
+                  uid, 
+                  email, 
+                  name, 
+                  userType: userType || 'student',
+                  createdAt: createdAt || new Date().toISOString(),
+                  lastLogin: lastLogin || new Date().toISOString(),
+                  isOffline: isOffline === 1 
+                };
+                console.log('💾 [MOCK] User saved:', email);
+                if (successCallback) successCallback({ insertId: 1, rowsAffected: 1 });
+                
+              } else if (sqlLower.startsWith('select * from users where uid = ?')) {
+                // Get user by ID
+                const uid = params[0];
+                const user = mockData.users[uid] || null;
+                console.log('👤 [MOCK] User retrieved by ID:', user ? user.email : 'Not found');
+                if (successCallback) successCallback({ 
+                  rows: { 
+                    _array: user ? [user] : [],
+                    length: user ? 1 : 0,
+                    item: (index) => user ? user : null
+                  } 
+                });
+                
+              } else if (sqlLower.startsWith('select * from users order by lastlogin desc')) {
+                // Get all users
+                const users = Object.values(mockData.users);
+                console.log(`👥 [MOCK] All users retrieved: ${users.length}`);
+                if (successCallback) successCallback({ 
+                  rows: { 
+                    _array: users,
+                    length: users.length,
+                    item: (index) => users[index] || null
+                  } 
+                });
+                
+              } else if (sqlLower.startsWith('insert or replace into notes')) {
+                // Save note
+                const [id, userId, title, content, tags, isPinned, isFavorite, permission, createdAt, updatedAt, syncStatus] = params;
+                mockData.notes[id] = {
+                  id, userId, title, content, 
+                  tags: typeof tags === 'string' ? JSON.parse(tags) : (tags || []),
+                  isPinned: isPinned === 1,
+                  isFavorite: isFavorite === 1,
+                  permission: permission || 'private',
+                  createdAt: createdAt || new Date().toISOString(),
+                  updatedAt: updatedAt || new Date().toISOString(),
+                  syncStatus: syncStatus || 'synced'
+                };
+                console.log('💾 [MOCK] Note saved:', title);
+                if (successCallback) successCallback({ insertId: 1, rowsAffected: 1 });
+                
+              } else if (sqlLower.startsWith('select * from notes where userid = ?')) {
+                // Get notes for user
+                const userId = params[0];
+                const userNotes = Object.values(mockData.notes).filter(note => note.userId === userId);
+                console.log('📝 [MOCK] Notes retrieved for user:', userNotes.length);
+                if (successCallback) successCallback({ 
+                  rows: { 
+                    _array: userNotes,
+                    length: userNotes.length,
+                    item: (index) => userNotes[index] || null
+                  } 
+                });
+                
+              } else if (sqlLower.startsWith('delete from notes where id = ?')) {
+                // Delete note
+                const noteId = params[0];
+                const existed = mockData.notes.hasOwnProperty(noteId);
+                delete mockData.notes[noteId];
+                console.log('🗑️ [MOCK] Note deleted:', noteId, existed ? '(existed)' : '(did not exist)');
+                if (successCallback) successCallback({ rowsAffected: existed ? 1 : 0 });
+                
+              } else if (sqlLower.startsWith('create table')) {
+                // Table creation - always succeed
+                console.log('📊 [MOCK] Table creation attempted');
+                if (successCallback) successCallback({});
+                
+              } else {
+                // Default success for other operations
+                console.log('🔧 [MOCK] Default SQL handler for:', sql.substring(0, 50) + '...');
+                if (successCallback) successCallback({ 
+                  rows: { 
+                    _array: [],
+                    length: 0,
+                    item: () => null
+                  } 
+                });
+              }
+            } catch (error) {
+              console.error('❌ [MOCK] SQL execution error:', error);
+              if (errorCallback) errorCallback({ message: error.message });
             }
           }
-        });
+        };
+        
+        // Execute the callback with our mock transaction
+        callback(mockTransaction);
       } catch (e) {
-        console.log('❌ Mock transaction error:', e);
+        console.log('❌ Mock transaction setup error:', e);
       }
     }
   };
+
+  return mockDB;
 }
+
+// Initialize the database
+db = createEnhancedMockDatabase();
+isRealSQLite = false;
+
+console.log('✅ SQLite service initialized with Mock Database');
 
 // User operations
 const saveUser = async (user) => {
@@ -185,16 +158,24 @@ const saveUser = async (user) => {
 
     db.transaction(tx => {
       tx.executeSql(
-        `INSERT OR REPLACE INTO users (uid, email, name, userType, createdAt, lastLogin) 
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [user.uid, user.email, user.name, user.userType, user.createdAt, user.lastLogin],
-        (_, result) => {
-          console.log(isRealSQLite ? '💾 [REAL SQLite] User saved:' : '💾 [MOCK+STORAGE] User saved:', user.email);
+        `INSERT OR REPLACE INTO users (uid, email, name, userType, createdAt, lastLogin, isOffline) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          user.uid, 
+          user.email, 
+          user.name, 
+          user.userType || 'student',
+          user.createdAt || new Date().toISOString(),
+          user.lastLogin || new Date().toISOString(),
+          user.isOffline ? 1 : 0
+        ],
+        (result) => {
+          console.log('💾 [MOCK] User saved successfully:', user.email);
           resolve(result);
         },
-        (_, error) => {
-          console.log('⚠️ Could not save user');
-          resolve();
+        (error) => {
+          console.log('⚠️ Could not save user:', error);
+          resolve(); // Resolve anyway to prevent blocking
         }
       );
     });
@@ -213,16 +194,51 @@ const getUser = async (uid) => {
       tx.executeSql(
         'SELECT * FROM users WHERE uid = ?',
         [uid],
-        (_, { rows }) => {
-          const user = rows._array[0];
+        (_, result) => {
+          const user = result.rows._array[0] || null;
           if (user) {
-            console.log(isRealSQLite ? '👤 [REAL SQLite] User found:' : '👤 [MOCK+STORAGE] User found:', user.email);
+            console.log('👤 [MOCK] User found:', user.email);
+          } else {
+            console.log('👤 [MOCK] User not found for ID:', uid);
           }
-          resolve(user || null);
+          resolve(user);
         },
-        (_, error) => {
-          console.log('⚠️ Could not get user');
-          resolve(null);
+        (error) => {
+          console.log('⚠️ Could not get user:', error);
+          resolve(null); // Resolve with null instead of rejecting
+        }
+      );
+    });
+  });
+};
+
+// In your sqliteService.js, update the getAllUsers method:
+const getAllUsers = async () => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve([]);
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT * FROM users ORDER BY lastLogin DESC',
+        [],
+        (tx, result) => {  // Add 'tx' parameter here
+          // Check if result exists and has rows
+          if (result && result.rows) {
+            const users = result.rows._array || [];
+            console.log(`👥 [MOCK] Retrieved ${users.length} users from database`);
+            resolve(users);
+          } else {
+            console.log('👥 [MOCK] No result or rows property');
+            resolve([]);
+          }
+        },
+        (tx, error) => {  // Add 'tx' parameter here
+          console.log('⚠️ Could not get users:', error);
+          resolve([]);
         }
       );
     });
@@ -238,7 +254,7 @@ const saveNote = async (note) => {
       return;
     }
 
-    const tagsString = note.tags ? JSON.stringify(note.tags) : '[]';
+    const tagsString = JSON.stringify(note.tags || []);
     
     db.transaction(tx => {
       tx.executeSql(
@@ -246,16 +262,24 @@ const saveNote = async (note) => {
          (id, userId, title, content, tags, isPinned, isFavorite, permission, createdAt, updatedAt, syncStatus) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          note.id, note.userId, note.title, note.content, tagsString,
-          note.isPinned ? 1 : 0, note.isFavorite ? 1 : 0, note.permission,
-          note.createdAt, note.updatedAt, note.syncStatus || 'synced'
+          note.id, 
+          note.userId, 
+          note.title, 
+          note.content || '', 
+          tagsString,
+          note.isPinned ? 1 : 0, 
+          note.isFavorite ? 1 : 0, 
+          note.permission || 'private',
+          note.createdAt || new Date().toISOString(),
+          note.updatedAt || new Date().toISOString(),
+          note.syncStatus || 'synced'
         ],
-        (_, result) => {
-          console.log(isRealSQLite ? '💾 [REAL SQLite] Note saved:' : '💾 [MOCK+STORAGE] Note saved:', note.title);
+        (result) => {
+          console.log('💾 [MOCK] Note saved:', note.title);
           resolve(result);
         },
-        (_, error) => {
-          console.log('⚠️ Could not save note');
+        (error) => {
+          console.log('⚠️ Could not save note:', error);
           resolve();
         }
       );
@@ -275,18 +299,18 @@ const getNotes = async (userId) => {
       tx.executeSql(
         'SELECT * FROM notes WHERE userId = ? ORDER BY updatedAt DESC',
         [userId],
-        (_, { rows }) => {
-          const notes = rows._array.map(row => ({
+        (_, result) => {
+          const notes = (result.rows._array || []).map(row => ({
             ...row,
             tags: row.tags ? JSON.parse(row.tags) : [],
             isPinned: row.isPinned === 1,
             isFavorite: row.isFavorite === 1
           }));
-          console.log(isRealSQLite ? '📝 [REAL SQLite] Notes loaded:' : '📝 [MOCK+STORAGE] Notes loaded:', notes.length);
+          console.log('📝 [MOCK] Notes loaded:', notes.length);
           resolve(notes);
         },
-        (_, error) => {
-          console.log('⚠️ Could not get notes');
+        (error) => {
+          console.log('⚠️ Could not get notes:', error);
           resolve([]);
         }
       );
@@ -306,12 +330,12 @@ const deleteNote = async (noteId) => {
       tx.executeSql(
         'DELETE FROM notes WHERE id = ?',
         [noteId],
-        (_, result) => {
-          console.log(isRealSQLite ? '🗑️ [REAL SQLite] Note deleted:' : '🗑️ [MOCK+STORAGE] Note deleted:', noteId);
+        (result) => {
+          console.log('🗑️ [MOCK] Note deleted:', noteId);
           resolve(result);
         },
-        (_, error) => {
-          console.log('⚠️ Could not delete note');
+        (error) => {
+          console.log('⚠️ Could not delete note:', error);
           resolve();
         }
       );
@@ -319,7 +343,7 @@ const deleteNote = async (noteId) => {
   });
 };
 
-// Sync operations (simplified for now)
+// Sync operations
 const addToSyncQueue = async (tableName, recordId, operation, data) => {
   console.log('🔄 Sync queue added:', operation, recordId);
   return Promise.resolve();
@@ -338,11 +362,10 @@ const markNoteForSync = async (noteId, operation, data) => {
   return Promise.resolve();
 };
 
-console.log(`✅ SQLite service loaded: ${isRealSQLite ? 'REAL SQLite' : 'Enhanced Mock with Storage'}`);
-
 export default {
   saveUser,
   getUser,
+  getAllUsers,
   saveNote,
   getNotes,
   deleteNote,

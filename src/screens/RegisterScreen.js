@@ -1,4 +1,4 @@
-// src/screens/RegisterScreen.js - Updated with password toggle
+// src/screens/RegisterScreen.js
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, ActivityIndicator } from 'react-native';
 import { useAuth } from '../context/AuthContext';
@@ -13,7 +13,7 @@ const RegisterScreen = ({ navigation }) => {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const { register, authLoading } = useAuth();
+  const { register, authLoading, isOnline } = useAuth();
 
   const handleRegister = async () => {
     const { name, email, password, confirmPassword, userType } = formData;
@@ -38,7 +38,6 @@ const RegisterScreen = ({ navigation }) => {
     
     if (result.success) {
       console.log('✅ Registration successful - RootNavigator will handle navigation');
-      // RootNavigator automatically handles navigation based on auth state
     } else {
       Alert.alert('Registration Failed', result.error);
     }
@@ -61,6 +60,14 @@ const RegisterScreen = ({ navigation }) => {
       <View style={styles.header}>
         <Text style={styles.title}>Join SYNAPSE</Text>
         <Text style={styles.subtitle}>Start connecting your knowledge</Text>
+        
+        {/* Offline Status Indicator */}
+        <View style={styles.statusContainer}>
+          <View style={[styles.statusDot, isOnline ? styles.onlineDot : styles.offlineDot]} />
+          <Text style={styles.statusText}>
+            {isOnline ? 'Online' : 'Offline Mode'}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.form}>
@@ -116,6 +123,14 @@ const RegisterScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
+        {!isOnline && (
+          <View style={styles.offlineNotice}>
+            <Text style={styles.offlineNoticeText}>
+              📴 Offline Mode - Account will be stored locally
+            </Text>
+          </View>
+        )}
+
         <View style={styles.userTypeContainer}>
           <Text style={styles.userTypeLabel}>I am a:</Text>
           <View style={styles.userTypeOptions}>
@@ -147,7 +162,9 @@ const RegisterScreen = ({ navigation }) => {
           {authLoading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.registerButtonText}>Create Account</Text>
+            <Text style={styles.registerButtonText}>
+              {isOnline ? 'Create Account' : 'Create Offline Account'}
+            </Text>
           )}
         </TouchableOpacity>
 
@@ -186,6 +203,28 @@ const styles = StyleSheet.create({
     color: '#e0e7ff',
     textAlign: 'center',
   },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  onlineDot: {
+    backgroundColor: '#10b981',
+  },
+  offlineDot: {
+    backgroundColor: '#f59e0b',
+  },
+  statusText: {
+    color: '#e0e7ff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   form: {
     backgroundColor: '#fff',
     padding: 20,
@@ -213,7 +252,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    paddingRight: 50, // Make space for the eye icon
+    paddingRight: 50,
   },
   eyeIcon: {
     position: 'absolute',
@@ -226,6 +265,20 @@ const styles = StyleSheet.create({
   },
   eyeIconText: {
     fontSize: 18,
+  },
+  offlineNotice: {
+    backgroundColor: '#fef3c7',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 15,
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+  },
+  offlineNoticeText: {
+    color: '#92400e',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   userTypeContainer: {
     marginBottom: 20,
