@@ -15,33 +15,69 @@ const RegisterScreen = ({ navigation }) => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { register, authLoading, isOnline } = useAuth();
 
-  const handleRegister = async () => {
-    const { name, email, password, confirmPassword, userType } = formData;
+// In your RegisterScreen.js, update the handleRegister function:
+const handleRegister = async () => {
+  const { name, email, password, confirmPassword, userType } = formData;
 
-    if (!name || !email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
+  if (!name || !email || !password || !confirmPassword) {
+    Alert.alert('Error', 'Please fill in all fields');
+    return;
+  }
 
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
-      return;
-    }
+  if (password !== confirmPassword) {
+    Alert.alert('Error', 'Passwords do not match');
+    return;
+  }
 
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
-      return;
-    }
+  if (password.length < 6) {
+    Alert.alert('Error', 'Password must be at least 6 characters');
+    return;
+  }
 
-    console.log('👤 Attempting registration for:', email);
-    const result = await register({ name, email, password, userType });
+  console.log('👤 Attempting registration for:', email);
+  const result = await register({ name, email, password, userType });
+  
+  if (result.success) {
+    console.log('✅ Registration successful');
     
-    if (result.success) {
-      console.log('✅ Registration successful - RootNavigator will handle navigation');
+    if (isOnline) {
+      // Online registration - redirect to login
+      Alert.alert(
+        'Registration Successful', 
+        'Your account has been created! Please login with your credentials.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.navigate('Login', { email });
+            }
+          }
+        ]
+      );
     } else {
-      Alert.alert('Registration Failed', result.error);
+      // Offline registration - auto login
+      console.log('📴 Offline registration - auto logging in...');
+      const loginResult = await login(email, password);
+      
+      if (loginResult.success) {
+        Alert.alert(
+          'Registration Successful', 
+          'Your account has been created and you are now logged in!',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Registration Successful', 
+          'Account created! Please login manually.',
+          [{ text: 'OK', onPress: () => navigation.navigate('Login', { email }) }]
+        );
+      }
     }
-  };
+  } else {
+    Alert.alert('Registration Failed', result.error);
+  }
+};
+
 
   const updateFormData = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -181,7 +217,7 @@ const RegisterScreen = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create({ 
   container: {
     flex: 1,
     backgroundColor: '#6366f1',

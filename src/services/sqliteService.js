@@ -4,7 +4,7 @@ console.log('📱 SQLite service loading...');
 let db = null;
 let isRealSQLite = false;
 
-// Create enhanced mock database (since real SQLite often has issues in React Native)
+// Create enhanced mock database
 function createEnhancedMockDatabase() {
   console.log('🔄 Creating enhanced mock database for React Native');
   
@@ -23,7 +23,7 @@ function createEnhancedMockDatabase() {
       try {
         // Create a mock transaction object
         const mockTransaction = {
-          executeSql: (sql, params, successCallback, errorCallback) => {
+          executeSql: (sql, params = [], successCallback, errorCallback) => {
             console.log('⚡ [MOCK] Executing SQL:', sql.substring(0, 100) + '...');
             
             try {
@@ -32,43 +32,58 @@ function createEnhancedMockDatabase() {
               // Handle different SQL operations
               if (sqlLower.startsWith('insert or replace into users')) {
                 // Save user
-                const [uid, email, name, userType, createdAt, lastLogin, isOffline] = params;
+                const [uid, email, name, userType, password, createdAt, lastLogin, isOffline] = params;
                 mockData.users[uid] = { 
                   uid, 
                   email, 
                   name, 
                   userType: userType || 'student',
+                  password: password || '',
                   createdAt: createdAt || new Date().toISOString(),
                   lastLogin: lastLogin || new Date().toISOString(),
                   isOffline: isOffline === 1 
                 };
                 console.log('💾 [MOCK] User saved:', email);
-                if (successCallback) successCallback({ insertId: 1, rowsAffected: 1 });
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    insertId: 1,
+                    rowsAffected: 1,
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
                 
               } else if (sqlLower.startsWith('select * from users where uid = ?')) {
                 // Get user by ID
                 const uid = params[0];
                 const user = mockData.users[uid] || null;
                 console.log('👤 [MOCK] User retrieved by ID:', user ? user.email : 'Not found');
-                if (successCallback) successCallback({ 
-                  rows: { 
-                    _array: user ? [user] : [],
-                    length: user ? 1 : 0,
-                    item: (index) => user ? user : null
-                  } 
-                });
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: user ? [user] : [],
+                      length: user ? 1 : 0,
+                      item: (index) => user ? user : null
+                    }
+                  });
+                }
                 
               } else if (sqlLower.startsWith('select * from users order by lastlogin desc')) {
                 // Get all users
                 const users = Object.values(mockData.users);
                 console.log(`👥 [MOCK] All users retrieved: ${users.length}`);
-                if (successCallback) successCallback({ 
-                  rows: { 
-                    _array: users,
-                    length: users.length,
-                    item: (index) => users[index] || null
-                  } 
-                });
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: users,
+                      length: users.length,
+                      item: (index) => users[index] || null
+                    }
+                  });
+                }
                 
               } else if (sqlLower.startsWith('insert or replace into notes')) {
                 // Save note
@@ -84,20 +99,32 @@ function createEnhancedMockDatabase() {
                   syncStatus: syncStatus || 'synced'
                 };
                 console.log('💾 [MOCK] Note saved:', title);
-                if (successCallback) successCallback({ insertId: 1, rowsAffected: 1 });
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    insertId: 1,
+                    rowsAffected: 1,
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
                 
               } else if (sqlLower.startsWith('select * from notes where userid = ?')) {
                 // Get notes for user
                 const userId = params[0];
                 const userNotes = Object.values(mockData.notes).filter(note => note.userId === userId);
                 console.log('📝 [MOCK] Notes retrieved for user:', userNotes.length);
-                if (successCallback) successCallback({ 
-                  rows: { 
-                    _array: userNotes,
-                    length: userNotes.length,
-                    item: (index) => userNotes[index] || null
-                  } 
-                });
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: userNotes,
+                      length: userNotes.length,
+                      item: (index) => userNotes[index] || null
+                    }
+                  });
+                }
                 
               } else if (sqlLower.startsWith('delete from notes where id = ?')) {
                 // Delete note
@@ -105,27 +132,48 @@ function createEnhancedMockDatabase() {
                 const existed = mockData.notes.hasOwnProperty(noteId);
                 delete mockData.notes[noteId];
                 console.log('🗑️ [MOCK] Note deleted:', noteId, existed ? '(existed)' : '(did not exist)');
-                if (successCallback) successCallback({ rowsAffected: existed ? 1 : 0 });
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rowsAffected: existed ? 1 : 0,
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
                 
               } else if (sqlLower.startsWith('create table')) {
                 // Table creation - always succeed
                 console.log('📊 [MOCK] Table creation attempted');
-                if (successCallback) successCallback({});
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
                 
               } else {
                 // Default success for other operations
                 console.log('🔧 [MOCK] Default SQL handler for:', sql.substring(0, 50) + '...');
-                if (successCallback) successCallback({ 
-                  rows: { 
-                    _array: [],
-                    length: 0,
-                    item: () => null
-                  } 
-                });
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
               }
             } catch (error) {
               console.error('❌ [MOCK] SQL execution error:', error);
-              if (errorCallback) errorCallback({ message: error.message });
+              if (errorCallback) {
+                errorCallback(mockTransaction, error);
+              }
             }
           }
         };
@@ -147,7 +195,7 @@ isRealSQLite = false;
 
 console.log('✅ SQLite service initialized with Mock Database');
 
-// User operations
+// User operations - FIXED: All callbacks now properly handle the transaction parameter
 const saveUser = async (user) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -158,24 +206,25 @@ const saveUser = async (user) => {
 
     db.transaction(tx => {
       tx.executeSql(
-        `INSERT OR REPLACE INTO users (uid, email, name, userType, createdAt, lastLogin, isOffline) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO users (uid, email, name, userType, password, createdAt, lastLogin, isOffline) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           user.uid, 
           user.email, 
           user.name, 
           user.userType || 'student',
+          user.password || '',
           user.createdAt || new Date().toISOString(),
           user.lastLogin || new Date().toISOString(),
           user.isOffline ? 1 : 0
         ],
-        (result) => {
+        (tx, result) => {
           console.log('💾 [MOCK] User saved successfully:', user.email);
           resolve(result);
         },
-        (error) => {
+        (tx, error) => {
           console.log('⚠️ Could not save user:', error);
-          resolve(); // Resolve anyway to prevent blocking
+          resolve(); // Resolve instead of reject to prevent unhandled promises
         }
       );
     });
@@ -194,7 +243,7 @@ const getUser = async (uid) => {
       tx.executeSql(
         'SELECT * FROM users WHERE uid = ?',
         [uid],
-        (_, result) => {
+        (tx, result) => {
           const user = result.rows._array[0] || null;
           if (user) {
             console.log('👤 [MOCK] User found:', user.email);
@@ -203,7 +252,7 @@ const getUser = async (uid) => {
           }
           resolve(user);
         },
-        (error) => {
+        (tx, error) => {
           console.log('⚠️ Could not get user:', error);
           resolve(null); // Resolve with null instead of rejecting
         }
@@ -212,7 +261,6 @@ const getUser = async (uid) => {
   });
 };
 
-// In your sqliteService.js, update the getAllUsers method:
 const getAllUsers = async () => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -225,20 +273,14 @@ const getAllUsers = async () => {
       tx.executeSql(
         'SELECT * FROM users ORDER BY lastLogin DESC',
         [],
-        (tx, result) => {  // Add 'tx' parameter here
-          // Check if result exists and has rows
-          if (result && result.rows) {
-            const users = result.rows._array || [];
-            console.log(`👥 [MOCK] Retrieved ${users.length} users from database`);
-            resolve(users);
-          } else {
-            console.log('👥 [MOCK] No result or rows property');
-            resolve([]);
-          }
+        (tx, result) => {
+          const users = result.rows._array || [];
+          console.log(`👥 [MOCK] Retrieved ${users.length} users from database`);
+          resolve(users);
         },
-        (tx, error) => {  // Add 'tx' parameter here
+        (tx, error) => {
           console.log('⚠️ Could not get users:', error);
-          resolve([]);
+          resolve([]); // Always resolve with empty array
         }
       );
     });
@@ -274,11 +316,11 @@ const saveNote = async (note) => {
           note.updatedAt || new Date().toISOString(),
           note.syncStatus || 'synced'
         ],
-        (result) => {
+        (tx, result) => {
           console.log('💾 [MOCK] Note saved:', note.title);
           resolve(result);
         },
-        (error) => {
+        (tx, error) => {
           console.log('⚠️ Could not save note:', error);
           resolve();
         }
@@ -299,7 +341,7 @@ const getNotes = async (userId) => {
       tx.executeSql(
         'SELECT * FROM notes WHERE userId = ? ORDER BY updatedAt DESC',
         [userId],
-        (_, result) => {
+        (tx, result) => {
           const notes = (result.rows._array || []).map(row => ({
             ...row,
             tags: row.tags ? JSON.parse(row.tags) : [],
@@ -309,7 +351,7 @@ const getNotes = async (userId) => {
           console.log('📝 [MOCK] Notes loaded:', notes.length);
           resolve(notes);
         },
-        (error) => {
+        (tx, error) => {
           console.log('⚠️ Could not get notes:', error);
           resolve([]);
         }
@@ -330,11 +372,11 @@ const deleteNote = async (noteId) => {
       tx.executeSql(
         'DELETE FROM notes WHERE id = ?',
         [noteId],
-        (result) => {
+        (tx, result) => {
           console.log('🗑️ [MOCK] Note deleted:', noteId);
           resolve(result);
         },
-        (error) => {
+        (tx, error) => {
           console.log('⚠️ Could not delete note:', error);
           resolve();
         }

@@ -9,22 +9,24 @@ const LoginScreen = ({ navigation }) => {
   const [showPassword, setShowPassword] = useState(false);
   const { login, authLoading, isOnline } = useAuth();
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
+ // In your LoginScreen.js, update the handleLogin function:
+const handleLogin = async () => {
+  if (!email || !password) {
+    Alert.alert('Error', 'Please fill in all fields');
+    return;
+  }
 
-    console.log('🔐 Attempting login for:', email);
-    const result = await login(email, password);
-    
-    if (result.success) {
-      console.log('✅ Login successful - RootNavigator will handle navigation');
-    } else {
-      Alert.alert('Login Failed', result.error);
-      setPassword(''); // Clear password on error
-    }
-  };
+  console.log('🔐 Attempting login for:', email);
+  const result = await login(email, password);
+  
+  if (result.success) {
+    console.log('✅ Login successful');
+    // RootNavigator will handle navigation automatically
+  } else {
+    Alert.alert('Login Failed', result.error);
+    setPassword(''); // Clear password on error
+  }
+}; 
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
@@ -232,6 +234,6 @@ const styles = StyleSheet.create({
     color: '#6366f1',
     fontWeight: 'bold',
   },
-});
-
+}); 
+  
 export default LoginScreen;

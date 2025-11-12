@@ -1,9 +1,9 @@
-// src/context/AuthContext.js - Simplified version
+// src/context/AuthContext.js
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { authService } from '../services/authService';
-import sqliteService from '../services/sqliteService';
+import sqliteService from '../services/sqliteService'; // FIXED IMPORT PATH
 import NetInfo from '@react-native-community/netinfo';
 
 const AuthContext = createContext();
@@ -25,7 +25,7 @@ export const AuthProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
-  // Load initial auth state
+  // Load initial auth state - BOTH ONLINE AND OFFLINE
   useEffect(() => {
     console.log('🔄 AuthContext: Checking authentication state...');
     
@@ -33,33 +33,31 @@ export const AuthProvider = ({ children }) => {
       try {
         setLoading(true);
         
-        // First, check Firebase auth
+        // First, check Firebase auth (online)
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
           console.log('🔥 Firebase auth state:', firebaseUser ? `User ${firebaseUser.email}` : 'No user');
           
           if (firebaseUser) {
-            // User is signed in with Firebase
-            const userData = await authService.getCurrentUser(firebaseUser.uid);
-            const mergedUser = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email,
-              emailVerified: firebaseUser.emailVerified,
-              displayName: firebaseUser.displayName,
-              ...userData
-            };
-            setUser(mergedUser);
-            console.log('✅ User loaded from Firebase');
+            // User is signed in with Firebase - load full user data
+            try {
+              const userData = await authService.getCurrentUser(firebaseUser.uid);
+              const mergedUser = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                emailVerified: firebaseUser.emailVerified,
+                displayName: firebaseUser.displayName,
+                ...userData
+              };
+              setUser(mergedUser);
+              console.log('✅ User loaded from Firebase');
+            } catch (error) {
+              console.error('❌ Error loading Firebase user:', error);
+              // Even if Firebase fails, try SQLite as fallback
+              await checkSQLiteForUser(firebaseUser.email);
+            }
           } else {
             // No Firebase user, check SQLite for offline access
-            console.log('📱 Checking SQLite for offline users...');
-            const offlineUsers = await sqliteService.getAllUsers();
-            if (offlineUsers.length > 0) {
-              console.log('✅ Using offline user from SQLite');
-              setUser(offlineUsers[0]);
-            } else {
-              console.log('❌ No user found (online or offline)');
-              setUser(null);
-            }
+            await checkSQLiteForUser();
           }
           
           setLoading(false);
@@ -69,6 +67,31 @@ export const AuthProvider = ({ children }) => {
       } catch (error) {
         console.error('❌ Error checking auth state:', error);
         setLoading(false);
+        setUser(null);
+      }
+    };
+
+    const checkSQLiteForUser = async (email = null) => {
+      try {
+        console.log('📱 Checking SQLite for users...');
+        const offlineUsers = await sqliteService.getAllUsers();
+        
+        if (offlineUsers.length > 0) {
+          let userToUse = offlineUsers[0];
+          
+          // If we have a specific email, try to find that user
+          if (email) {
+            userToUse = offlineUsers.find(u => u.email === email) || offlineUsers[0];
+          }
+          
+          console.log('✅ Using user from SQLite:', userToUse.email);
+          setUser(userToUse);
+        } else {
+          console.log('❌ No users found in SQLite');
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('❌ Error checking SQLite:', error);
         setUser(null);
       }
     };
@@ -99,15 +122,25 @@ export const AuthProvider = ({ children }) => {
       let userData;
       
       if (isOnline) {
-        userData = await authService.login(email, password);
+        // Try online login first
+        try {
+          userData = await authService.login(email, password);
+          console.log('✅ Online login successful');
+        } catch (onlineError) {
+          console.log('❌ Online login failed, trying offline:', onlineError.message);
+          // If online fails, try offline
+          userData = await authService.offlineLogin(email, password);
+          console.log('✅ Offline login successful as fallback');
+        }
       } else {
+        // Offline login only
         userData = await authService.offlineLogin(email, password);
+        console.log('✅ Offline login successful');
       }
       
       if (userData) {
-        const fullUserData = await loadUserData(userData);
-        setUser(fullUserData);
-        return { success: true, data: fullUserData };
+        setUser(userData);
+        return { success: true, data: userData };
       }
       
       return { success: false, error: 'Login failed' };
@@ -127,17 +160,25 @@ export const AuthProvider = ({ children }) => {
       let newUser;
       
       if (isOnline) {
+        // Online registration - also saves to SQLite for offline access
         newUser = await authService.register(userData);
+        console.log('✅ Online registration successful');
       } else {
+        // Offline registration only
         newUser = await authService.offlineRegister(userData);
+        console.log('✅ Offline registration successful');
       }
       
       if (newUser) {
-        setUser(newUser);
+        // For online registration, we don't auto-login
+        // For offline registration, we can auto-login since we're already offline
+        if (!isOnline) {
+          setUser(newUser);
+        }
         return { success: true, data: newUser };
       }
       
-      return { success: true, data: newUser };
+      return { success: false, error: 'Registration failed' };
     } catch (error) {
       return { success: false, error: error.message };
     } finally {
@@ -158,20 +199,6 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('❌ Logout error:', error);
       throw error;
-    }
-  };
-
-  // Helper function to load user data
-  const loadUserData = async (userData) => {
-    try {
-      if (isOnline && userData.uid && !userData.isOffline) {
-        const firestoreData = await authService.getCurrentUser(userData.uid);
-        return { ...userData, ...firestoreData };
-      }
-      return userData;
-    } catch (error) {
-      console.error('❌ Error loading user data:', error);
-      return userData;
     }
   };
 
@@ -198,4 +225,4 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-};
+}; 
