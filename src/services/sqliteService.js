@@ -195,7 +195,7 @@ isRealSQLite = false;
 
 console.log('✅ SQLite service initialized with Mock Database');
 
-// User operations - FIXED: All callbacks now properly handle the transaction parameter
+// In your sqliteService.js - check the saveUser function
 const saveUser = async (user) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -213,24 +213,24 @@ const saveUser = async (user) => {
           user.email, 
           user.name, 
           user.userType || 'student',
-          user.password || '',
+          user.password || '', // ✅ Ensure password is never undefined
           user.createdAt || new Date().toISOString(),
           user.lastLogin || new Date().toISOString(),
           user.isOffline ? 1 : 0
         ],
         (tx, result) => {
           console.log('💾 [MOCK] User saved successfully:', user.email);
+          console.log('🔑 Password saved:', user.password ? 'YES' : 'NO');
           resolve(result);
         },
         (tx, error) => {
           console.log('⚠️ Could not save user:', error);
-          resolve(); // Resolve instead of reject to prevent unhandled promises
+          resolve();
         }
       );
     });
   });
 };
-
 const getUser = async (uid) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -329,6 +329,7 @@ const saveNote = async (note) => {
   });
 };
 
+// In your sqliteService.js - fix the getNotes function
 const getNotes = async (userId) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -342,14 +343,39 @@ const getNotes = async (userId) => {
         'SELECT * FROM notes WHERE userId = ? ORDER BY updatedAt DESC',
         [userId],
         (tx, result) => {
-          const notes = (result.rows._array || []).map(row => ({
-            ...row,
-            tags: row.tags ? JSON.parse(row.tags) : [],
-            isPinned: row.isPinned === 1,
-            isFavorite: row.isFavorite === 1
-          }));
-          console.log('📝 [MOCK] Notes loaded:', notes.length);
-          resolve(notes);
+          try {
+            const notes = (result.rows._array || []).map(row => {
+              let tags = [];
+              
+              // Safely parse tags
+              if (row.tags) {
+                try {
+                  if (typeof row.tags === 'string') {
+                    // Remove any unexpected characters and parse
+                    const cleanedTags = row.tags.replace(/[^\w\s",\[\]]/g, '');
+                    tags = JSON.parse(cleanedTags);
+                  } else if (Array.isArray(row.tags)) {
+                    tags = row.tags;
+                  }
+                } catch (parseError) {
+                  console.log('⚠️ Could not parse tags, using empty array:', parseError.message);
+                  tags = [];
+                }
+              }
+              
+              return {
+                ...row,
+                tags: tags,
+                isPinned: row.isPinned === 1,
+                isFavorite: row.isFavorite === 1
+              };
+            });
+            console.log('📝 [MOCK] Notes loaded:', notes.length);
+            resolve(notes);
+          } catch (error) {
+            console.error('❌ Error processing notes:', error);
+            resolve([]);
+          }
         },
         (tx, error) => {
           console.log('⚠️ Could not get notes:', error);
@@ -417,4 +443,4 @@ export default {
   markNoteForSync,
   isInitialized: () => true,
   isRealSQLite: () => isRealSQLite
-};
+}; 

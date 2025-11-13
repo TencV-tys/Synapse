@@ -11,6 +11,7 @@ import sqliteService from './sqliteService';
 
 export const authService = {
   // Online login
+// In authService.js - COMPLETELY REPLACE the login function with this:
 async login(email, password) {
   try {
     console.log('🔐 Online login for:', email);
@@ -19,41 +20,28 @@ async login(email, password) {
     
     console.log('✅ Firebase login successful:', firebaseUser.uid);
     
-    // Get or create user data in Firestore
-    let userData;
+    // Create user data WITH PASSWORD - don't rely on Firestore
+    const userData = {
+      uid: firebaseUser.uid,
+      email: firebaseUser.email,
+      name: firebaseUser.displayName || email.split('@')[0],
+      userType: 'student',
+      password: password, // ✅ ALWAYS include the password
+      lastLogin: new Date().toISOString(),
+      createdAt: firebaseUser.metadata.creationTime || new Date().toISOString(),
+    };
+    
+    console.log('🔑 User data with password:', userData.password ? 'SET' : 'MISSING');
+    
+    // Try to update Firestore, but don't let it fail the login
     try {
-      const userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
-      if (userDoc.exists()) {
-        userData = userDoc.data();
-        console.log('✅ User data loaded from Firestore');
-      } else {
-        // Create user data if it doesn't exist
-        userData = {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          name: firebaseUser.displayName || email.split('@')[0],
-          userType: 'student',
-          password: password, // Store for offline access
-          createdAt: new Date().toISOString(),
-          lastLogin: new Date().toISOString(),
-        };
-        await setDoc(doc(firestore, 'users', firebaseUser.uid), userData);
-        console.log('✅ User data created in Firestore');
-      }
+      await setDoc(doc(firestore, 'users', firebaseUser.uid), userData, { merge: true });
+      console.log('✅ User data saved to Firestore');
     } catch (firestoreError) {
-      console.log('⚠️ Firestore error, using basic data:', firestoreError.message);
-      userData = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        name: firebaseUser.displayName || email.split('@')[0],
-        userType: 'student',
-        password: password,
-        lastLogin: new Date().toISOString(),
-        createdAt: firebaseUser.metadata.creationTime
-      };
+      console.log('⚠️ Firestore save failed, but continuing:', firestoreError.message);
     }
     
-    // ALWAYS save to SQLite for offline access (whether Firestore worked or not)
+    // ✅ CRITICAL: ALWAYS save to SQLite with password
     await sqliteService.saveUser(userData);
     console.log('✅ User data saved to SQLite for offline access');
     
@@ -63,38 +51,45 @@ async login(email, password) {
     throw new Error(this.getAuthErrorMessage(error.code));
   }
 },
-async offlineLogin(email, password) {
-  try {
-    console.log('📴 Offline login for:', email);
-    
-    // Get user from SQLite
-    const users = await sqliteService.getAllUsers();
-    const user = users.find(u => u.email === email);
-    
-    if (!user) {
-      throw new Error('No account found with this email.');
+
+  async offlineLogin(email, password) {
+    try {
+      console.log('📴 Offline login for:', email);
+      
+      // Get user from SQLite
+      const users = await sqliteService.getAllUsers();
+      const user = users.find(u => u.email === email);
+      
+      if (!user) {
+        throw new Error('No account found with this email.');
+      }
+      
+      console.log('🔑 Input password:', password);
+      console.log('🔑 Stored password:', user.password);
+      console.log('🔑 Password match:', user.password === password);
+      
+      // Check password - FIXED: Better comparison with debugging
+      if (user.password && user.password.toString() === password.toString()) {
+        console.log('✅ Offline login successful for:', user.email);
+        
+        // Update last login
+        const updatedUser = {
+          ...user,
+          lastLogin: new Date().toISOString()
+        };
+        await sqliteService.saveUser(updatedUser);
+        
+        return updatedUser;
+      } else {
+        console.log('❌ Password mismatch');
+        throw new Error('Incorrect password.');
+      }
+    } catch (error) {
+      console.error('❌ Offline login error:', error.message);
+      throw new Error(error.message || 'Offline login failed');
     }
-    
-    // Check password
-    if (user.password !== password) {
-      throw new Error('Incorrect password.');
-    }
-    
-    console.log('✅ Offline login successful for:', user.email);
-    
-    // Update last login
-    const updatedUser = {
-      ...user,
-      lastLogin: new Date().toISOString()
-    };
-    await sqliteService.saveUser(updatedUser);
-    
-    return updatedUser;
-  } catch (error) {
-    console.error('❌ Offline login error:', error.message);
-    throw new Error(error.message || 'Offline login failed');
-  }
-},
+  },
+
   // Online registration
   async register(userData) {
     try {
@@ -167,6 +162,19 @@ async offlineLogin(email, password) {
     }
   },
 
+  // CREATE USER PROFILE - ADD THIS MISSING METHOD
+  async createUserProfile(userData) {
+    try {
+      console.log('📝 Creating user profile in Firestore:', userData.email);
+      await setDoc(doc(firestore, 'users', userData.uid), userData);
+      console.log('✅ User profile created in Firestore');
+      return userData;
+    } catch (error) {
+      console.error('❌ Error creating user profile:', error);
+      throw error;
+    }
+  },
+
   async getCurrentUser(uid) {
     try {
       // Try Firebase first
@@ -208,9 +216,59 @@ async offlineLogin(email, password) {
       'auth/user-disabled': 'This account has been disabled.',
       'auth/user-not-found': 'No account found with this email.',
       'auth/wrong-password': 'Incorrect password.',
-      'auth/too-many-requests': 'Too many attempts. Please try again later.'
+      'auth/too-many-requests': 'Too many attempts. Please try again later.',
+      'auth/invalid-credential': 'Invalid email or password.'
     };
 
     return errorMessages[errorCode] || 'An unexpected error occurred.';
+  },
+  // Add this function to your authService to debug
+async debugSQLiteUsers() {
+  try {
+    const users = await sqliteService.getAllUsers();
+    console.log('🐛 DEBUG: Users in SQLite:', users.length);
+    users.forEach((user, index) => {
+      console.log(`🐛 User ${index + 1}:`, {
+        email: user.email,
+        password: user.password ? 'SET' : 'MISSING',
+        passwordLength: user.password ? user.password.length : 0
+      });
+    });
+    return users;
+  } catch (error) {
+    console.error('🐛 DEBUG Error:', error);
+    return [];
   }
-}; 
+},
+// Add this debug function to your authService.js
+async debugUserData() {
+  try {
+    console.log('🐛 DEBUG: Checking user data flow...');
+    
+    // Check what's in Firestore
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      const userDoc = await getDoc(doc(firestore, 'users', currentUser.uid));
+      if (userDoc.exists()) {
+        const firestoreData = userDoc.data();
+        console.log('🐛 Firestore user data:', {
+          email: firestoreData.email,
+          hasPassword: !!firestoreData.password,
+          password: firestoreData.password ? 'SET' : 'MISSING'
+        });
+      }
+    }
+    
+    // Check what's in SQLite
+    const sqliteUsers = await sqliteService.getAllUsers();
+    console.log('🐛 SQLite users:', sqliteUsers.map(u => ({
+      email: u.email,
+      hasPassword: !!u.password,
+      password: u.password ? 'SET' : 'MISSING'
+    })));
+    
+  } catch (error) {
+    console.error('🐛 DEBUG Error:', error);
+  }
+},
+};
