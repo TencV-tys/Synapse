@@ -136,14 +136,14 @@ useEffect(() => {
       
       console.log('✅ Offline user verified:', offlineUser.email);
       console.log('🔥 Creating Firebase account with same credentials...');
-      
+       
       // Create Firebase account with the same credentials
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
       
       console.log('✅ Firebase account created:', firebaseUser.email);
       
-      // Create user profile in Firestore
+      // Create user profile in Firestore 
       const userProfile = {
         uid: firebaseUser.uid,
         email: firebaseUser.email,
@@ -309,6 +309,7 @@ useEffect(() => {
 
   const value = {
     user,
+    setUser,
     login,
     register,
     logout,

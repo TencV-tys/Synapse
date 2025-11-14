@@ -1,12 +1,17 @@
 // src/screens/HomeScreen.js
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useNotes } from '../context/NotesContext';
 
 const HomeScreen = ({ navigation }) => {
   const { user, logout } = useAuth();
   const { notes, pinnedNotes, favorites } = useNotes();
+
+  // Get recent notes (last 3 notes)
+  const recentNotes = notes
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    .slice(0, 3);
 
   const handleLogout = async () => {
     try {
@@ -44,13 +49,52 @@ const HomeScreen = ({ navigation }) => {
     </TouchableOpacity>
   );
 
+  const NotePreview = ({ note }) => (
+    <TouchableOpacity 
+      style={styles.notePreview}
+      onPress={() => navigation.navigate('NoteEditor', { note })}
+    >
+      <Text style={styles.notePreviewTitle} numberOfLines={1}>
+        {note.title || 'Untitled Note'}
+      </Text>
+      <Text style={styles.notePreviewContent} numberOfLines={2}>
+        {note.content || 'No content'}
+      </Text>
+      <Text style={styles.notePreviewDate}>
+        {new Date(note.updatedAt).toLocaleDateString()}
+      </Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.welcome}>Welcome back, {user?.name || user?.email}!</Text>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+        <View style={styles.headerLeft}>
+          {user?.profilePic ? (
+            <Image source={{ uri: user.profilePic }} style={styles.profilePic} />
+          ) : (
+            <View style={styles.profilePicPlaceholder}>
+              <Text style={styles.profilePicText}>
+                {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
+              </Text>
+            </View>
+          )}
+          <View style={styles.welcomeContainer}>
+            <Text style={styles.welcome}>Welcome back,</Text>
+            <Text style={styles.userName}>{user?.name || user?.email}!</Text>
+          </View>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={styles.profileButton}
+            onPress={() => navigation.navigate('Profile')}
+          >
+            <Text style={styles.profileButtonText}>👤</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={styles.content}>
@@ -96,14 +140,31 @@ const HomeScreen = ({ navigation }) => {
 
           <TouchableOpacity 
             style={styles.actionButton}
-            onPress={() => navigation.navigate('Chat')}
+            onPress={() => navigation.navigate('Profile')}
           >
-            <Text style={styles.actionIcon}>💬</Text>
-            <Text style={styles.actionText}>Chat</Text>
+            <Text style={styles.actionIcon}>👤</Text>
+            <Text style={styles.actionText}>Profile</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Add a dedicated Chat section */}
+        {/* Recent Notes Section */}
+        {recentNotes.length > 0 && (
+          <View style={styles.recentNotesSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent Notes</Text>
+              <TouchableOpacity onPress={() => navigateToFilteredNotes('all')}>
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.recentNotesContainer}>
+              {recentNotes.map((note, index) => (
+                <NotePreview key={note.id || index} note={note} />
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Chat Section */}
         <View style={styles.chatSection}>
           <Text style={styles.sectionTitle}>Collaborate</Text>
           <TouchableOpacity 
@@ -156,11 +217,58 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     backgroundColor: '#6366f1',
   },
-  welcome: {
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  profilePic: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+  },
+  profilePicPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  profilePicText: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  welcomeContainer: {
     flex: 1,
+  },
+  welcome: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 2,
+  },
+  userName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  profileButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+  },
+  profileButtonText: {
+    color: '#fff',
+    fontSize: 16,
   },
   logoutButton: {
     paddingHorizontal: 15,
@@ -181,6 +289,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#334155',
     marginBottom: 15,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  seeAllText: {
+    color: '#6366f1',
+    fontWeight: '600',
+    fontSize: 14,
   },
   statsContainer: {
     flexDirection: 'row',
@@ -237,6 +356,38 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#334155',
     textAlign: 'center',
+  },
+  recentNotesSection: {
+    marginBottom: 30,
+  },
+  recentNotesContainer: {
+    gap: 12,
+  },
+  notePreview: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  notePreviewTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 6,
+  },
+  notePreviewContent: {
+    fontSize: 14,
+    color: '#64748b',
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  notePreviewDate: {
+    fontSize: 12,
+    color: '#94a3b8',
   },
   chatSection: {
     marginBottom: 30,

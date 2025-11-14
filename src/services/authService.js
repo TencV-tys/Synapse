@@ -50,8 +50,26 @@ async login(email, password) {
     console.error('❌ Online login error:', error.message);
     throw new Error(this.getAuthErrorMessage(error.code));
   }
+}, 
+// Add to src/services/authService.js
+async updateUserProfile(userData) {
+  try {
+    console.log('📝 Updating user profile:', userData.email);
+    
+    // Update in Firestore
+    await setDoc(doc(firestore, 'users', userData.uid), userData, { merge: true });
+    console.log('✅ User profile updated in Firestore');
+    
+    // Also update in SQLite
+    await sqliteService.saveUser(userData);
+    console.log('✅ User profile updated in SQLite');
+    
+    return userData;
+  } catch (error) {
+    console.error('❌ Error updating user profile:', error);
+    throw error;
+  }
 },
-
   async offlineLogin(email, password) {
     try {
       console.log('📴 Offline login for:', email);
@@ -151,7 +169,7 @@ async login(email, password) {
         lastLogin: new Date().toISOString(),
         isOffline: true
       };
-      
+       
       await sqliteService.saveUser(newUser);
       console.log('✅ Offline registration successful');
       

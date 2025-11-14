@@ -13,6 +13,7 @@ import HomeScreen from './src/screens/HomeScreen';
 import NotesScreen from './src/screens/NotesScreen';
 import NoteEditorScreen from './src/screens/NoteEditorScreen';
 import ChatScreen from './src/screens/ChatScreen';
+import ProfileScreen from './src/screens/ProfileScreen'; // Add this import
 
 const Stack = createStackNavigator();
 
@@ -70,6 +71,14 @@ const AppStack = () => (
       component={ChatScreen} 
       options={{ 
         title: 'Chat',
+        headerBackTitle: 'Back'
+      }} 
+    />
+    <Stack.Screen 
+      name="Profile" 
+      component={ProfileScreen} 
+      options={{ 
+        title: 'Profile',
         headerBackTitle: 'Back'
       }} 
     />
