@@ -21,7 +21,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Initialize Firebase Auth with AsyncStorage - Check if already initialized
-let auth;
+let auth; 
 try {
   auth = initializeAuth(app, {
     persistence: getReactNativePersistence(AsyncStorage) // Use AsyncStorage directly

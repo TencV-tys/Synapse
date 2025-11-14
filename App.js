@@ -13,7 +13,8 @@ import HomeScreen from './src/screens/HomeScreen';
 import NotesScreen from './src/screens/NotesScreen';
 import NoteEditorScreen from './src/screens/NoteEditorScreen';
 import ChatScreen from './src/screens/ChatScreen';
-import ProfileScreen from './src/screens/ProfileScreen'; // Add this import
+import ProfileScreen from './src/screens/ProfileScreen';
+import DirectMessagesScreen from './src/screens/DirectMessagesScreen'; // Add this import
 
 const Stack = createStackNavigator();
 
@@ -71,6 +72,14 @@ const AppStack = () => (
       component={ChatScreen} 
       options={{ 
         title: 'Chat',
+        headerBackTitle: 'Back'
+      }} 
+    />
+    <Stack.Screen 
+      name="DirectMessages" 
+      component={DirectMessagesScreen} 
+      options={{ 
+        title: 'Direct Messages',
         headerBackTitle: 'Back'
       }} 
     />

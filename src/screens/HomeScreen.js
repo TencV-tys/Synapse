@@ -140,10 +140,10 @@ const HomeScreen = ({ navigation }) => {
 
           <TouchableOpacity 
             style={styles.actionButton}
-            onPress={() => navigation.navigate('Profile')}
+            onPress={() => navigation.navigate('DirectMessages')}
           >
-            <Text style={styles.actionIcon}>👤</Text>
-            <Text style={styles.actionText}>Profile</Text>
+            <Text style={styles.actionIcon}>💭</Text>
+            <Text style={styles.actionText}>Messages</Text>
           </TouchableOpacity>
         </View>
 
@@ -167,21 +167,39 @@ const HomeScreen = ({ navigation }) => {
         {/* Chat Section */}
         <View style={styles.chatSection}>
           <Text style={styles.sectionTitle}>Collaborate</Text>
-          <TouchableOpacity 
-            style={styles.chatCard}
-            onPress={() => navigation.navigate('Chat')}
-          >
-            <View style={styles.chatIconContainer}>
-              <Text style={styles.chatIcon}>💬</Text>
-            </View>
-            <View style={styles.chatContent}>
-              <Text style={styles.chatTitle}>Synapse Chat</Text>
-              <Text style={styles.chatDescription}>
-                Real-time messaging with other users. Discuss ideas and collaborate instantly.
-              </Text>
-            </View>
-            <Text style={styles.arrow}>→</Text>
-          </TouchableOpacity>
+          <View style={styles.chatCardsContainer}>
+            <TouchableOpacity 
+              style={styles.chatCard}
+              onPress={() => navigation.navigate('Chat')}
+            >
+              <View style={styles.chatIconContainer}>
+                <Text style={styles.chatIcon}>👥</Text>
+              </View>
+              <View style={styles.chatContent}>
+                <Text style={styles.chatTitle}>Public Chat</Text>
+                <Text style={styles.chatDescription}>
+                  Chat with everyone in the community
+                </Text>
+              </View>
+              <Text style={styles.arrow}>→</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.chatCard}
+              onPress={() => navigation.navigate('DirectMessages')}
+            >
+              <View style={styles.chatIconContainer}>
+                <Text style={styles.chatIcon}>💬</Text>
+              </View>
+              <View style={styles.chatContent}>
+                <Text style={styles.chatTitle}>Direct Messages</Text>
+                <Text style={styles.chatDescription}>
+                  Private conversations with other users
+                </Text>
+              </View>
+              <Text style={styles.arrow}>→</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {notes.length === 0 && (
@@ -392,6 +410,9 @@ const styles = StyleSheet.create({
   chatSection: {
     marginBottom: 30,
   },
+  chatCardsContainer: {
+    gap: 12,
+  },
   chatCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -466,4 +487,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default HomeScreen;
+export default HomeScreen; 

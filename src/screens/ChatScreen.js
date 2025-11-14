@@ -10,66 +10,94 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal,
+  Image,
+  Keyboard
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { database } from '../config/firebase';
 import { ref, push, onValue, off, set, serverTimestamp } from 'firebase/database';
 
-const ChatScreen = () => {
+const ChatScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
+  const [users, setUsers] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [connectionError, setConnectionError] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  
+  // Get direct message parameters from navigation
+  const { directMessage, targetUser } = route.params || {};
+  
+  const [activeChat, setActiveChat] = useState(
+    directMessage ? targetUser?.id : 'public'
+  );
+  const [activeChatName, setActiveChatName] = useState(
+    directMessage ? targetUser?.name : 'Public Chat'
+  );
+  const [showChatSelector, setShowChatSelector] = useState(false);
+  const [showUserProfile, setShowUserProfile] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
   const flatListRef = useRef(null);
 
-  // Debug Firebase connection
+  // Keyboard handling
   useEffect(() => {
-    console.log('🔍 Checking Firebase Database connection...');
-    console.log('📡 Database instance:', database ? '✅ Connected' : '❌ Not connected');
-    console.log('👤 Current user:', user ? user.email : 'No user');
-  }, [user]);
+    const keyboardDidShowListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      }
+    );
 
-  // Reference to the chat messages in Firebase
-  const chatRef = ref(database, 'chats/public');
+    const keyboardDidHideListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
+  }, []);
+
+  // References
+  const publicChatRef = ref(database, 'chats/public');
+  const usersRef = ref(database, 'users');
 
   useEffect(() => {
-    console.log('💬 ChatScreen mounted - Setting up real-time listener');
+    console.log('💬 ChatScreen mounted - Setting up listeners');
+    console.log('📱 Chat mode:', directMessage ? `Direct with ${targetUser?.name}` : 'Public');
     
     if (!database) {
-      console.error('❌ Database not initialized - check databaseURL in firebase config');
+      console.error('❌ Database not initialized');
       setConnectionError(true);
       setLoading(false);
-      Alert.alert('Configuration Error', 'Chat feature not configured properly.');
       return;
     }
 
-    console.log('🎯 Setting up listener for:', chatRef.toString());
-    
-    // Listen for real-time messages
-    const unsubscribe = onValue(chatRef, (snapshot) => {
+    // Load chat messages
+    const chatUnsubscribe = onValue(getActiveChatRef(), (snapshot) => {
       try {
         setConnectionError(false);
         const data = snapshot.val();
-        console.log('📨 Firebase snapshot received:', data ? Object.keys(data).length + ' messages' : 'No data');
         
         if (data) {
           const messagesArray = Object.entries(data).map(([id, message]) => ({
             id,
             ...message
           })).sort((a, b) => {
-            // Handle timestamp sorting safely
             const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
             const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
             return timeA - timeB;
           });
           
-          console.log('✅ Messages processed:', messagesArray.length);
           setMessages(messagesArray);
         } else {
-          console.log('💬 No messages in database yet');
           setMessages([]);
         }
       } catch (error) {
@@ -79,25 +107,53 @@ const ChatScreen = () => {
         setLoading(false);
       }
     }, (error) => {
-      console.error('❌ Firebase listener error:', error);
-      console.error('Error details:', error.message, error.code);
+      console.error('❌ Chat listener error:', error);
       setConnectionError(true);
       setLoading(false);
-      
-      if (error.code === 'PERMISSION_DENIED') {
-        Alert.alert(
-          'Permission Denied', 
-          'You need to update Firebase Realtime Database rules to allow read/write access.'
-        );
-      }
     });
 
-    // Cleanup listener
+    // Only load online users if in public chat mode
+    if (!directMessage) {
+      const usersUnsubscribe = onValue(usersRef, (snapshot) => {
+        try {
+          const data = snapshot.val();
+          if (data) {
+            const usersArray = Object.entries(data)
+              .map(([id, userData]) => ({
+                id,
+                ...userData
+              }))
+              .filter(u => u.id !== user?.uid) // Exclude current user
+              .filter(u => u.lastActive && (Date.now() - new Date(u.lastActive).getTime()) < 300000); // Online in last 5 minutes
+            
+            setUsers(usersArray);
+          }
+        } catch (error) {
+          console.error('❌ Error loading users:', error);
+        }
+      });
+
+      return () => {
+        off(usersRef, 'value', usersUnsubscribe);
+        off(getActiveChatRef(), 'value', chatUnsubscribe);
+      };
+    }
+
     return () => {
       console.log('🧹 Cleaning up chat listener');
-      off(chatRef, 'value', unsubscribe);
+      off(getActiveChatRef(), 'value', chatUnsubscribe);
     };
-  }, []);
+  }, [activeChat, directMessage]);
+
+  const getActiveChatRef = () => {
+    if (activeChat === 'public') {
+      return publicChatRef;
+    } else {
+      // For direct messages, create a unique chat room ID
+      const chatId = [user.uid, activeChat].sort().join('_');
+      return ref(database, `chats/private/${chatId}`);
+    }
+  };
 
   const sendMessage = async () => {
     if (!newMessage.trim()) return;
@@ -115,22 +171,22 @@ const ChatScreen = () => {
     const messageText = newMessage.trim();
 
     try {
-      console.log('📤 Sending message as user:', user.email);
-      
+      const chatRef = getActiveChatRef();
       const newMessageRef = push(chatRef);
+      
       const messageData = {
         text: messageText,
         userId: user.uid,
         userName: user.name || user.email.split('@')[0],
         userEmail: user.email,
+        userProfilePic: user.profilePic,
+        userType: user.userType || 'student',
         timestamp: serverTimestamp(),
-        userType: user.userType || 'user'
+        chatType: activeChat === 'public' ? 'public' : 'private',
+        recipientId: activeChat !== 'public' ? activeChat : null
       };
       
-      console.log('💾 Message data:', messageData);
       await set(newMessageRef, messageData);
-
-      console.log('✅ Message sent successfully with ID:', newMessageRef.key);
       setNewMessage('');
       
       // Scroll to bottom after sending
@@ -140,27 +196,28 @@ const ChatScreen = () => {
 
     } catch (error) {
       console.error('❌ Error sending message:', error);
-      console.error('Send error details:', error.message, error.code);
-      
-      if (error.code === 'PERMISSION_DENIED') {
-        Alert.alert(
-          'Send Failed', 
-          'Permission denied. Please check Firebase Realtime Database rules.'
-        );
-      } else {
-        Alert.alert('Send Failed', 'Could not send message. Please check your connection and try again.');
-      }
+      Alert.alert('Send Failed', 'Could not send message. Please try again.');
       setConnectionError(true);
     } finally {
       setSending(false);
     }
   };
 
+  const startDirectMessage = (targetUser) => {
+    setActiveChat(targetUser.id);
+    setActiveChatName(targetUser.name || targetUser.email.split('@')[0]);
+    setShowChatSelector(false);
+  };
+
+  const showProfile = (userData) => {
+    setSelectedUser(userData);
+    setShowUserProfile(true);
+  };
+
   const formatTime = (timestamp) => {
     if (!timestamp) return 'Just now';
     
     try {
-      // Handle serverTimestamp (pending)
       if (typeof timestamp === 'object' && timestamp.hasOwnProperty('.sv')) {
         return 'Sending...';
       }
@@ -174,6 +231,24 @@ const ChatScreen = () => {
     }
   };
 
+  const getRoleColor = (userType) => {
+    switch (userType) {
+      case 'teacher': return '#dc2626';
+      case 'admin': return '#7c3aed';
+      case 'student': return '#059669';
+      default: return '#6b7280';
+    }
+  };
+
+  const getRoleLabel = (userType) => {
+    switch (userType) {
+      case 'teacher': return 'Teacher';
+      case 'admin': return 'Admin';
+      case 'student': return 'Student';
+      default: return 'User';
+    }
+  };
+
   const renderMessage = ({ item, index }) => {
     const isCurrentUser = item.userId === user?.uid;
     const showHeader = index === 0 || item.userId !== messages[index - 1]?.userId;
@@ -184,12 +259,35 @@ const ChatScreen = () => {
         isCurrentUser ? styles.currentUserMessage : styles.otherUserMessage
       ]}>
         {!isCurrentUser && showHeader && (
-          <View style={styles.messageHeader}>
-            <Text style={styles.userName}>{item.userName}</Text>
-            {item.userType && item.userType !== 'user' && (
-              <Text style={styles.userType}>{item.userType}</Text>
+          <TouchableOpacity 
+            style={styles.messageHeader}
+            onPress={() => showProfile(item)}
+          >
+            {item.userProfilePic ? (
+              <Image source={{ uri: item.userProfilePic }} style={styles.messageAvatar} />
+            ) : (
+              <View style={[styles.messageAvatar, styles.avatarPlaceholder]}>
+                <Text style={styles.avatarText}>
+                  {item.userName ? item.userName.charAt(0).toUpperCase() : 'U'}
+                </Text>
+              </View>
             )}
-          </View>
+            <View style={styles.userInfo}>
+              <Text style={styles.userName}>{item.userName}</Text>
+              <View style={styles.roleContainer}>
+                <View 
+                  style={[
+                    styles.roleBadge, 
+                    { backgroundColor: getRoleColor(item.userType) }
+                  ]}
+                >
+                  <Text style={styles.roleText}>
+                    {getRoleLabel(item.userType)}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </TouchableOpacity>
         )}
         
         <View style={[
@@ -217,25 +315,73 @@ const ChatScreen = () => {
     );
   };
 
+  const renderUserItem = ({ item }) => (
+    <TouchableOpacity 
+      style={styles.userItem}
+      onPress={() => startDirectMessage(item)}
+      onLongPress={() => showProfile(item)}
+    >
+      {item.profilePic ? (
+        <Image source={{ uri: item.profilePic }} style={styles.userAvatar} />
+      ) : (
+        <View style={[styles.userAvatar, styles.avatarPlaceholder]}>
+          <Text style={styles.avatarText}>
+            {item.name ? item.name.charAt(0).toUpperCase() : 'U'}
+          </Text>
+        </View>
+      )}
+      <View style={styles.userInfo}>
+        <Text style={styles.userName}>{item.name || item.email.split('@')[0]}</Text>
+        <View style={styles.userDetails}>
+          <View 
+            style={[
+              styles.roleBadge, 
+              { backgroundColor: getRoleColor(item.userType) }
+            ]}
+          >
+            <Text style={styles.roleText}>
+              {getRoleLabel(item.userType)}
+            </Text>
+          </View>
+          <View style={styles.onlineIndicator} />
+          <Text style={styles.onlineText}>Online</Text>
+        </View>
+      </View>
+      <Text style={styles.chatIcon}>💬</Text>
+    </TouchableOpacity>
+  );
+
   if (loading) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#6366f1" />
         <Text style={styles.loadingText}>Loading messages...</Text>
-        <Text style={styles.debugText}>Checking Firebase connection...</Text>
       </View>
     );
   }
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
+    <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>💬 Synapse Chat</Text>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backButtonText}>←</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.chatSelector}
+            onPress={() => !directMessage && setShowChatSelector(true)}
+            disabled={directMessage}
+          >
+            <Text style={styles.title}>
+              {directMessage ? '💬 ' : '👥 '}{activeChatName}
+            </Text>
+            {!directMessage && <Text style={styles.dropdownIcon}>▼</Text>}
+          </TouchableOpacity>
+        </View>
         <View style={styles.statusContainer}>
           <View style={[styles.statusDot, connectionError ? styles.offlineDot : styles.onlineDot]} />
           <Text style={styles.statusText}>
@@ -247,7 +393,7 @@ const ChatScreen = () => {
       {connectionError && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>
-            ⚠️ Connection issue. {user ? 'Check Firebase rules.' : 'Please login.'}
+            ⚠️ Connection issue. Check your internet connection.
           </Text>
         </View>
       )}
@@ -266,25 +412,20 @@ const ChatScreen = () => {
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>💬</Text>
             <Text style={styles.emptyTitle}>
-              {connectionError ? 'Connection Issue' : 'No messages yet'}
+              {directMessage ? 'Start a conversation' : 'No messages yet'}
             </Text>
             <Text style={styles.emptyText}>
-              {connectionError 
-                ? 'Check Firebase Realtime Database configuration and rules.'
+              {directMessage 
+                ? `Send a message to start chatting with ${activeChatName}`
                 : 'Start the conversation! Send the first message.'
               }
             </Text>
-            {connectionError && (
-              <Text style={styles.debugHelp}>
-                Make sure Realtime Database is enabled and rules allow read/write.
-              </Text>
-            )}
           </View>
         }
       />
 
-      {/* Message Input */}
-      <View style={styles.inputContainer}>
+      {/* Message Input with Keyboard Handling */}
+      <View style={[styles.inputContainer, { marginBottom: keyboardHeight }]}>
         <TextInput
           style={[
             styles.textInput,
@@ -296,6 +437,11 @@ const ChatScreen = () => {
           multiline
           maxLength={500}
           editable={!sending && !connectionError}
+          onFocus={() => {
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }, 100);
+          }}
         />
         <TouchableOpacity 
           style={[
@@ -312,7 +458,120 @@ const ChatScreen = () => {
           )}
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+
+      {/* Chat Selector Modal - Only show in public chat mode */}
+      {!directMessage && (
+        <Modal
+          visible={showChatSelector}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowChatSelector(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Chat</Text>
+                <TouchableOpacity onPress={() => setShowChatSelector(false)}>
+                  <Text style={styles.closeButton}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Public Chat Option */}
+              <TouchableOpacity 
+                style={styles.chatOption}
+                onPress={() => {
+                  setActiveChat('public');
+                  setActiveChatName('Public Chat');
+                  setShowChatSelector(false);
+                }}
+              >
+                <View style={styles.chatOptionIcon}>
+                  <Text style={styles.chatOptionEmoji}>👥</Text>
+                </View>
+                <View style={styles.chatOptionInfo}>
+                  <Text style={styles.chatOptionName}>Public Chat</Text>
+                  <Text style={styles.chatOptionDescription}>
+                    Chat with everyone in the community
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Online Users */}
+              <Text style={styles.sectionTitle}>Online Users ({users.length})</Text>
+              <FlatList
+                data={users}
+                renderItem={renderUserItem}
+                keyExtractor={item => item.id}
+                style={styles.usersList}
+                showsVerticalScrollIndicator={false}
+                ListEmptyComponent={
+                  <Text style={styles.noUsersText}>No other users online</Text>
+                }
+              />
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* User Profile Modal */}
+      <Modal
+        visible={showUserProfile}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowUserProfile(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.profileModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>User Profile</Text>
+              <TouchableOpacity onPress={() => setShowUserProfile(false)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {selectedUser && (
+              <View style={styles.profileContent}>
+                {selectedUser.profilePic ? (
+                  <Image source={{ uri: selectedUser.profilePic }} style={styles.profileAvatar} />
+                ) : (
+                  <View style={[styles.profileAvatar, styles.avatarPlaceholder]}>
+                    <Text style={styles.profileAvatarText}>
+                      {selectedUser.name ? selectedUser.name.charAt(0).toUpperCase() : 'U'}
+                    </Text>
+                  </View>
+                )}
+                
+                <Text style={styles.profileName}>
+                  {selectedUser.name || selectedUser.email.split('@')[0]}
+                </Text>
+                <Text style={styles.profileEmail}>{selectedUser.email}</Text>
+                
+                <View 
+                  style={[
+                    styles.profileRoleBadge,
+                    { backgroundColor: getRoleColor(selectedUser.userType) }
+                  ]}
+                >
+                  <Text style={styles.profileRoleText}>
+                    {getRoleLabel(selectedUser.userType)}
+                  </Text>
+                </View>
+
+                <TouchableOpacity 
+                  style={styles.messageUserButton}
+                  onPress={() => {
+                    startDirectMessage(selectedUser);
+                    setShowUserProfile(false);
+                  }}
+                >
+                  <Text style={styles.messageUserButtonText}>💬 Send Message</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 };
 
@@ -333,12 +592,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  debugText: {
-    marginTop: 5,
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'center',
-  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -347,10 +600,34 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     backgroundColor: '#6366f1',
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  backButton: {
+    marginRight: 12,
+    padding: 4,
+  },
+  backButtonText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  chatSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
+    marginRight: 8,
+  },
+  dropdownIcon: {
+    color: '#fff',
+    fontSize: 12,
   },
   statusContainer: {
     flexDirection: 'row',
@@ -406,20 +683,45 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     marginLeft: 10,
   },
+  messageAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#6366f1',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   userName: {
     fontSize: 12,
     fontWeight: '600',
     color: '#475569',
     marginRight: 6,
   },
-  userType: {
-    fontSize: 10,
-    color: '#6366f1',
-    backgroundColor: '#e0e7ff',
+  roleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  roleBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 8,
-    overflow: 'hidden',
+  },
+  roleText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
   },
   messageBubble: {
     maxWidth: '80%',
@@ -478,6 +780,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
     alignItems: 'flex-end',
+     paddingBottom: Platform.OS === 'ios' ? 60 : 50,
   },
   textInput: {
     flex: 1,
@@ -534,14 +837,170 @@ const styles = StyleSheet.create({
     color: '#64748b',
     textAlign: 'center',
     lineHeight: 20,
-    marginBottom: 10,
   },
-  debugHelp: {
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    paddingBottom: 20,
+  },
+  profileModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '60%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#334155',
+  },
+  closeButton: {
+    fontSize: 20,
+    color: '#64748b',
+    fontWeight: 'bold',
+  },
+  chatOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  chatOptionIcon: {
+    marginRight: 12,
+  },
+  chatOptionEmoji: {
+    fontSize: 24,
+  },
+  chatOptionInfo: {
+    flex: 1,
+  },
+  chatOptionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 2,
+  },
+  chatOptionDescription: {
     fontSize: 12,
-    color: '#94a3b8',
-    textAlign: 'center',
-    fontStyle: 'italic',
+    color: '#64748b',
   },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
+    marginTop: 15,
+    marginBottom: 10,
+    marginLeft: 15,
+  },
+  usersList: {
+    maxHeight: 300,
+  },
+  userItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f8fafc',
+  },
+  userAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  userDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  onlineIndicator: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+    marginLeft: 8,
+    marginRight: 4,
+  },
+  onlineText: {
+    fontSize: 11,
+    color: '#10b981',
+  },
+  chatIcon: {
+    fontSize: 16,
+    marginLeft: 'auto',
+  },
+  noUsersText: {
+    textAlign: 'center',
+    color: '#94a3b8',
+    fontStyle: 'italic',
+    padding: 20,
+  },
+  // Profile Modal Styles
+  profileContent: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  profileAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 16,
+  },
+  profileAvatarText: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: 'bold',
+  },
+  profileName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#334155',
+    marginBottom: 4,
+  },
+  profileEmail: {
+    fontSize: 16,
+    color: '#64748b',
+    marginBottom: 12,
+  },
+  profileRoleBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  profileRoleText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  messageUserButton: {
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  messageUserButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  }, 
 });
 
 export default ChatScreen;
