@@ -14,12 +14,12 @@ import { useNotes } from '../context/NotesContext';
 import { useAuth } from '../context/AuthContext';
 
 const NotesScreen = ({ route, navigation }) => {
-  const { notes, deleteNote, togglePin, searchNotes, loading } = useNotes();
+  const { notes, deleteNote, togglePin, toggleFavorite, searchNotes, loading } = useNotes();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredNotes, setFilteredNotes] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
-
+ 
   // Get filter from navigation params
   const { filter, filterTitle } = route.params || {};
 
@@ -94,6 +94,11 @@ const NotesScreen = ({ route, navigation }) => {
     togglePin(noteId);
   };
 
+  const handleToggleFavorite = (noteId) => {
+    console.log('⭐ Toggling favorite for note:', noteId);
+    toggleFavorite(noteId);
+  };
+
   const clearFilters = () => {
     setSearchQuery('');
     navigation.setParams({ filter: 'all', filterTitle: 'My Notes' });
@@ -117,6 +122,10 @@ const NotesScreen = ({ route, navigation }) => {
               onPress: () => handleTogglePin(note.id),
             },
             {
+              text: note.isFavorite ? 'Remove from Favorites' : 'Add to Favorites',
+              onPress: () => handleToggleFavorite(note.id),
+            },
+            {
               text: 'Delete',
               style: 'destructive',
               onPress: () => handleDeleteNote(note.id, note.title),
@@ -128,6 +137,23 @@ const NotesScreen = ({ route, navigation }) => {
       <View style={styles.noteHeader}>
         <Text style={styles.noteTitle}>{note.title}</Text>
         <View style={styles.noteActions}>
+          {/* Favorite Button */}
+          <TouchableOpacity 
+            onPress={(e) => {
+              e.stopPropagation();
+              handleToggleFavorite(note.id);
+            }}
+            style={styles.actionButton}
+          >
+            <Text style={[
+              styles.favoriteIcon,
+              note.isFavorite && styles.favoriteIconActive
+            ]}>
+              {note.isFavorite ? '⭐' : '☆'}
+            </Text>
+          </TouchableOpacity>
+          
+          {/* Pin Button */}
           <TouchableOpacity 
             onPress={(e) => {
               e.stopPropagation();
@@ -135,9 +161,15 @@ const NotesScreen = ({ route, navigation }) => {
             }}
             style={styles.actionButton}
           >
-            <Text style={styles.pinIcon}>{note.isPinned ? '📌' : '📍'}</Text>
+            <Text style={[
+              styles.pinIcon,
+              note.isPinned && styles.pinIconActive
+            ]}>
+              {note.isPinned ? '📌' : '📍'}
+            </Text>
           </TouchableOpacity>
           
+          {/* Delete Button */}
           <TouchableOpacity 
             onPress={(e) => {
               e.stopPropagation();
@@ -338,8 +370,24 @@ const styles = StyleSheet.create({
     padding: 5,
     marginLeft: 10,
   },
-  pinIcon: { fontSize: 16 },
-  deleteIcon: { fontSize: 16 },
+  favoriteIcon: {
+    fontSize: 16,
+    opacity: 0.6,
+  },
+  favoriteIconActive: {
+    opacity: 1,
+  },
+  pinIcon: {
+    fontSize: 16,
+    opacity: 0.6,
+  },
+  pinIconActive: {
+    opacity: 1,
+  },
+  deleteIcon: { 
+    fontSize: 16,
+    opacity: 0.6,
+  },
   noteContent: { 
     color: '#666', 
     lineHeight: 20,
@@ -482,4 +530,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default NotesScreen; 
+export default NotesScreen;
