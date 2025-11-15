@@ -10,7 +10,9 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
-  FlatList
+  FlatList,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { useNotes } from '../context/NotesContext';
 import { useAuth } from '../context/AuthContext';
@@ -107,7 +109,10 @@ const NoteEditorScreen = ({ route, navigation }) => {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} disabled={loading}>
           <Text style={[styles.cancelButton, loading && styles.disabledButton]}>
@@ -136,76 +141,83 @@ const NoteEditorScreen = ({ route, navigation }) => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.editor}>
-        {/* Privacy Toggle */}
-        <TouchableOpacity 
-          style={styles.privacyToggle}
-          onPress={togglePrivacy}
+      <View style={styles.content}>
+        <ScrollView 
+          style={styles.editor}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.editorContent}
         >
-          <View style={styles.privacyInfo}>
-            <Text style={styles.privacyLabel}>
-              {isPublic ? '👁️ Public (View Only)' : '🔒 Private'}
+          {/* Privacy Toggle */}
+          <TouchableOpacity 
+            style={styles.privacyToggle}
+            onPress={togglePrivacy}
+          >
+            <View style={styles.privacyInfo}>
+              <Text style={styles.privacyLabel}>
+                {isPublic ? '👁️ Public (View Only)' : '🔒 Private'}
+              </Text>
+              <Text style={styles.privacyDescription}>
+                {isPublic ? 'Others can view this note' : 'Only you can see this note'}
+              </Text>
+            </View>
+            <View style={[styles.toggleSwitch, isPublic && styles.toggleSwitchActive]}>
+              <View style={styles.toggleKnob} />
+            </View>
+          </TouchableOpacity>
+
+          {/* Category Selector */}
+          <TouchableOpacity 
+            style={styles.categorySelector}
+            onPress={() => setCategoryModalVisible(true)}
+          >
+            <Text style={styles.categorySelectorLabel}>
+              {getCurrentCategory() ? `Category: ${getCurrentCategory().name}` : 'Add to Category...'}
             </Text>
-            <Text style={styles.privacyDescription}>
-              {isPublic ? 'Others can view this note' : 'Only you can see this note'}
-            </Text>
-          </View>
-          <View style={[styles.toggleSwitch, isPublic && styles.toggleSwitchActive]}>
-            <View style={styles.toggleKnob} />
-          </View>
-        </TouchableOpacity>
+            <Text style={styles.categorySelectorArrow}>▼</Text>
+          </TouchableOpacity>
 
-        {/* Category Selector */}
-        <TouchableOpacity 
-          style={styles.categorySelector}
-          onPress={() => setCategoryModalVisible(true)}
-        >
-          <Text style={styles.categorySelectorLabel}>
-            {getCurrentCategory() ? `Category: ${getCurrentCategory().name}` : 'Add to Category...'}
-          </Text>
-          <Text style={styles.categorySelectorArrow}>▼</Text>
-        </TouchableOpacity>
+          {getCurrentCategory() && (
+            <View style={[styles.selectedCategory, { backgroundColor: getCurrentCategory().color + '20' }]}>
+              <View style={[styles.categoryColor, { backgroundColor: getCurrentCategory().color }]} />
+              <Text style={styles.selectedCategoryText}>{getCurrentCategory().name}</Text>
+              <TouchableOpacity onPress={handleRemoveCategory}>
+                <Text style={styles.removeCategoryText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-        {getCurrentCategory() && (
-          <View style={[styles.selectedCategory, { backgroundColor: getCurrentCategory().color + '20' }]}>
-            <View style={[styles.categoryColor, { backgroundColor: getCurrentCategory().color }]} />
-            <Text style={styles.selectedCategoryText}>{getCurrentCategory().name}</Text>
-            <TouchableOpacity onPress={handleRemoveCategory}>
-              <Text style={styles.removeCategoryText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          <TextInput
+            style={styles.titleInput}
+            placeholder="Note Title"
+            value={title}
+            onChangeText={setTitle}
+            multiline
+            placeholderTextColor="#999"
+            editable={!loading}
+          />
+          
+          <TextInput
+            style={styles.contentInput}
+            placeholder="Start writing your thoughts..."
+            value={content}
+            onChangeText={setContent}
+            multiline
+            textAlignVertical="top"
+            placeholderTextColor="#999"
+            editable={!loading}
+          />
 
-        <TextInput
-          style={styles.titleInput}
-          placeholder="Note Title"
-          value={title}
-          onChangeText={setTitle}
-          multiline
-          placeholderTextColor="#999"
-          editable={!loading}
-        />
-        
-        <TextInput
-          style={styles.contentInput}
-          placeholder="Start writing your thoughts..."
-          value={content}
-          onChangeText={setContent}
-          multiline
-          textAlignVertical="top"
-          placeholderTextColor="#999"
-          editable={!loading}
-        />
+          <TextInput
+            style={styles.tagsInput}
+            placeholder="Tags (comma separated)"
+            value={tags}
+            onChangeText={setTags}
+            placeholderTextColor="#999"
+            editable={!loading}
+          />
+        </ScrollView>
 
-        <TextInput
-          style={styles.tagsInput}
-          placeholder="Tags (comma separated)"
-          value={tags}
-          onChangeText={setTags}
-          placeholderTextColor="#999"
-          editable={!loading}
-        />
-
+        {/* Status Container - Fixed at bottom */}
         <View style={styles.statusContainer}>
           <Text style={styles.statusText}>
             {loading ? '💾 Saving...' : isPublic ? '👁️ Public Note' : '🔒 Private Note'}
@@ -217,7 +229,7 @@ const NoteEditorScreen = ({ route, navigation }) => {
             }
           </Text>
         </View>
-      </ScrollView>
+      </View>
 
       {/* Category Selection Modal */}
       <Modal
@@ -259,7 +271,7 @@ const NoteEditorScreen = ({ route, navigation }) => {
           </View>
         </View>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -296,9 +308,15 @@ const styles = StyleSheet.create({
     color: '#999',
     opacity: 0.5,
   },
-  editor: { 
-    flex: 1, 
+  content: {
+    flex: 1,
+  },
+  editor: {
+    flex: 1,
+  },
+  editorContent: {
     padding: 20,
+    paddingBottom: 100, // Extra padding to account for status container
   },
   // Privacy Toggle Styles
   privacyToggle: {
@@ -341,7 +359,6 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     backgroundColor: '#fff',
-    transform: [{ translateX: 0 }],
   },
   // Category Styles
   categorySelector: {
@@ -415,11 +432,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
     borderRadius: 8,
   },
+  // Status Container - Fixed at bottom
   statusContainer: {
-    marginTop: 30,
-    padding: 16,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     backgroundColor: '#f0f9ff',
-    borderRadius: 10,
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
     borderLeftWidth: 4,
     borderLeftColor: '#6366f1',
   },
@@ -427,7 +449,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#6366f1',
-    marginBottom: 5,
+    marginBottom: 4,
   },
   privacyHint: {
     fontSize: 12,

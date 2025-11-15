@@ -1,5 +1,5 @@
 // src/screens/CategoriesScreen.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   RefreshControl
 } from 'react-native';
 import { useNotes } from '../context/NotesContext';
+import { useFocusEffect } from '@react-navigation/native';
 
 const CategoriesScreen = ({ navigation }) => {
   const { 
@@ -35,6 +36,14 @@ const CategoriesScreen = ({ navigation }) => {
     '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
     '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6b7280'
   ];
+
+  // Refresh categories when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('🎯 CategoriesScreen focused - refreshing data');
+      refreshData();
+    }, [refreshData])
+  );
 
   // Reset modal when it closes
   useEffect(() => {

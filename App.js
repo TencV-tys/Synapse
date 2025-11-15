@@ -14,7 +14,7 @@ import NotesScreen from './src/screens/NotesScreen';
 import NoteEditorScreen from './src/screens/NoteEditorScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import DirectMessagesScreen from './src/screens/DirectMessagesScreen'; // Add this import
+import DirectMessagesScreen from './src/screens/DirectMessagesScreen';
 import CategoriesScreen from './src/screens/CategoriesScreen';
 import DebugScreen from './src/screens/DebugScreen';
 
@@ -64,10 +64,10 @@ const AppStack = () => (
     <Stack.Screen 
       name="NoteEditor" 
       component={NoteEditorScreen} 
-      options={{ 
-        title: 'Edit Note',
+      options={({ route }) => ({ 
+        title: route.params?.note ? 'Edit Note' : 'Create Note', // ✅ Fixed
         headerBackTitle: 'Back'
-      }} 
+      })} 
     />
     <Stack.Screen 
       name="Chat" 
@@ -94,14 +94,14 @@ const AppStack = () => (
       }} 
     />
     <Stack.Screen 
-  name="Categories" 
-  component={CategoriesScreen} 
-  options={{ 
-    title: 'Categories',
-    headerBackTitle: 'Back'
-  }} 
-/>
-<Stack.Screen name="Debug" component={DebugScreen} />
+      name="Categories" 
+      component={CategoriesScreen} 
+      options={{ 
+        title: 'Categories',
+        headerBackTitle: 'Back'
+      }} 
+    />
+    <Stack.Screen name="Debug" component={DebugScreen} />
   </Stack.Navigator>
 );
 

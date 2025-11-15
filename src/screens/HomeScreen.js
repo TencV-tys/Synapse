@@ -500,7 +500,7 @@ const HomeScreen = ({ navigation }) => {
           navigation={navigation} 
       />
     </View>
-  );
+  ); 
 };
 
 const styles = StyleSheet.create({

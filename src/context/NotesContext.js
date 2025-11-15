@@ -28,51 +28,54 @@ export const NotesProvider = ({ children }) => {
     });
     return () => unsubscribe();
   }, []);
-
+  
   // Load notes and categories when user changes
-  useEffect(() => {
-    console.log('🔄 NotesContext: User changed', user ? user.uid : 'No user');
-    // In your NotesContext.js, update the loadData function:
-const loadData = async () => {
-  if (!user) {
-    setNotes([]);
-    setCategories([]);
-    return;
-  }
-
-  setLoading(true);
-  try {
-    console.log('📚 Loading data for user:', user.uid);
-    const [userNotes, userCategories] = await Promise.all([
-      notesService.getUserNotes(user.uid),
-      notesService.getUserCategories(user.uid)
-    ]);
-    
-    console.log('✅ Data loaded:', {
-      notes: userNotes.length,
-      categories: userCategories.length
-    });
-    
-    // 🆕 Initialize default categories if none exist
-    let finalCategories = userCategories;
-    if (userCategories.length === 0) {
-      console.log('🆕 No categories found, initializing default categories...');
-      finalCategories = await notesService.initializeDefaultCategories(user.uid);
+useEffect(() => {
+  console.log('🔄 NotesContext: User changed', user ? user.uid : 'No user');
+  
+  const loadData = async () => {
+    if (!user) {
+      setNotes([]);
+      setCategories([]);
+      return;
     }
-    
-    setNotes(userNotes);
-    setCategories(finalCategories);
-    
-  } catch (error) {
-    console.error('❌ Error loading data:', error);
-    setNotes([]);
-    setCategories([]);
-  } finally {
-    setLoading(false);
-  }
-};
-  }, [user]);
 
+    setLoading(true);
+    try {
+      console.log('📚 Loading data for user:', user.uid);
+      const [userNotes, userCategories] = await Promise.all([
+        notesService.getUserNotes(user.uid),
+        notesService.getUserCategories(user.uid)
+      ]);
+      
+      console.log('✅ Data loaded:', {
+        notes: userNotes.length,
+        categories: userCategories.length
+      });
+      
+      // 🆕 Initialize default categories if none exist
+      let finalCategories = userCategories;
+      if (userCategories.length === 0) {
+        console.log('🆕 No categories found, initializing default categories...');
+        finalCategories = await notesService.initializeDefaultCategories(user.uid);
+      }
+      
+      setNotes(userNotes);
+      setCategories(finalCategories);
+      
+    } catch (error) {
+      console.error('❌ Error loading data:', error);
+      setNotes([]);
+      setCategories([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 🚨 IMPORTANT: Actually call the loadData function!
+  loadData();
+}, [user]);
+  
   // Real-time subscription to user notes
   useEffect(() => {
     if (!user) return;

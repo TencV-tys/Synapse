@@ -448,7 +448,7 @@ const saveNote = async (note) => {
           resolve();
         }
       );
-    });
+    }); 
   });
 };
 
