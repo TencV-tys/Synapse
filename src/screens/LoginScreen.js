@@ -68,13 +68,20 @@ const LoginScreen = ({ navigation }) => {
     setShowPassword(!showPassword);
   };
 
-  const handleForgotPassword = () => {
-    if (!isOnline) {
-      Alert.alert('Offline Mode', 'Password reset is not available in offline mode. Please connect to the internet.');
-      return;
-    }
-    Alert.alert('Forgot Password', 'Please contact support or check your email for password reset instructions.');
-  };
+  // In LoginScreen.js - update the handleForgotPassword function
+const handleForgotPassword = () => {
+  if (!isOnline) {
+    Alert.alert(
+      'Offline Mode', 
+      'Password reset is not available in offline mode. Please connect to the internet to reset your password.',
+      [{ text: 'OK' }]
+    );
+    return;
+  }
+  
+  // Navigate to ForgotPassword screen with email pre-filled if available
+  navigation.navigate('ForgotPassword', { email: email || '' });
+};
 
   const isLoginDisabled = authLoading || isLoggingIn || !email || !password;
 
@@ -380,5 +387,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-
+ 
 export default LoginScreen;

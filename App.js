@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from './src/context/AuthContext';
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
+import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import NotesScreen from './src/screens/NotesScreen';
 import NoteEditorScreen from './src/screens/NoteEditorScreen';
@@ -28,11 +29,12 @@ const LoadingScreen = () => (
   </View>
 );
 
-// Unauthenticated stack (login/register)
+// Unauthenticated stack (login/register/forgot-password)
 const AuthStack = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="Login" component={LoginScreen} />
     <Stack.Screen name="Register" component={RegisterScreen} />
+    <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
   </Stack.Navigator>
 );
 
@@ -65,7 +67,7 @@ const AppStack = () => (
       name="NoteEditor" 
       component={NoteEditorScreen} 
       options={({ route }) => ({ 
-        title: route.params?.note ? 'Edit Note' : 'Create Note', // ✅ Fixed
+        title: route.params?.note ? 'Edit Note' : 'Create Note',
         headerBackTitle: 'Back'
       })} 
     />
