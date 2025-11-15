@@ -1,5 +1,5 @@
 // src/screens/NotesScreen.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -8,17 +8,19 @@ import {
   TouchableOpacity, 
   TextInput, 
   ActivityIndicator,
-  Alert
+  Alert,
+  RefreshControl
 } from 'react-native';
 import { useNotes } from '../context/NotesContext';
 import { useAuth } from '../context/AuthContext';
 
 const NotesScreen = ({ route, navigation }) => {
-  const { notes, deleteNote, togglePin, toggleFavorite, searchNotes, loading } = useNotes();
+  const { notes, deleteNote, togglePin, toggleFavorite, searchNotes, loading, syncPendingChanges } = useNotes();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredNotes, setFilteredNotes] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [refreshing, setRefreshing] = useState(false);
  
   // Get filter from navigation params
   const { filter, filterTitle } = route.params || {};
@@ -35,6 +37,21 @@ const NotesScreen = ({ route, navigation }) => {
       navigation.setOptions({ title: filterTitle });
     }
   }, [notes, filter, searchQuery]);
+
+  // Pull to refresh function
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      console.log('🔄 Manual refresh triggered');
+      await syncPendingChanges();
+      // Simulate network request
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [syncPendingChanges]);
 
   const applyFilters = (filterType, query = '') => {
     let filtered = notes;
@@ -275,6 +292,14 @@ const NotesScreen = ({ route, navigation }) => {
           keyExtractor={item => item.id}
           contentContainerStyle={styles.notesList}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={onRefresh}
+              colors={['#6366f1']}
+              tintColor="#6366f1"
+            />
+          }
         />
       )}
 
@@ -530,4 +555,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default NotesScreen; 
+export default NotesScreen;

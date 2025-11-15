@@ -15,6 +15,7 @@ import NoteEditorScreen from './src/screens/NoteEditorScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import DirectMessagesScreen from './src/screens/DirectMessagesScreen'; // Add this import
+import CategoriesScreen from './src/screens/CategoriesScreen';
 
 const Stack = createStackNavigator();
 
@@ -91,6 +92,14 @@ const AppStack = () => (
         headerBackTitle: 'Back'
       }} 
     />
+    <Stack.Screen 
+  name="Categories" 
+  component={CategoriesScreen} 
+  options={{ 
+    title: 'Categories',
+    headerBackTitle: 'Back'
+  }} 
+/>
   </Stack.Navigator>
 );
 

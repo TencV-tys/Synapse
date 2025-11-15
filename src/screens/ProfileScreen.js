@@ -9,9 +9,9 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Image,
   Modal
 } from 'react-native';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/authService';
@@ -39,7 +39,7 @@ const ProfileScreen = ({ navigation }) => {
   const pickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -103,10 +103,25 @@ const ProfileScreen = ({ navigation }) => {
 
     setLoading(true);
     try {
+      let finalProfilePic = profilePic;
+      
+      // If it's a local file URI, upload it to Firebase Storage first
+      if (profilePic && profilePic.startsWith('file://')) {
+        try {
+          setUploading(true);
+          const downloadURL = await authService.uploadProfilePicture(profilePic, user.uid);
+          finalProfilePic = downloadURL;
+          setUploading(false);
+        } catch (uploadError) {
+          console.log('⚠️ Could not upload profile picture, keeping local URI');
+          // Keep local URI as fallback - expo-image can handle file:// URIs
+        }
+      }
+
       const updatedUser = {
         ...user,
         name: name.trim(),
-        profilePic: profilePic,
+        profilePic: finalProfilePic,
         updatedAt: new Date().toISOString()
       };
 
@@ -134,6 +149,7 @@ const ProfileScreen = ({ navigation }) => {
       Alert.alert('Error', 'Failed to update profile. Please try again.');
     } finally {
       setLoading(false);
+      setUploading(false);
     }
   };
 
@@ -158,7 +174,17 @@ const ProfileScreen = ({ navigation }) => {
             disabled={!isEditing}
           >
             {profilePic ? (
-              <Image source={{ uri: profilePic }} style={styles.avatarImage} />
+              <Image 
+                source={{ uri: profilePic }} 
+                style={styles.avatarImage}
+                placeholder={{ blurhash: 'L00p#k00RjRj~qayayay00Rj-;ay' }}
+                contentFit="cover"
+                transition={300}
+                onError={(e) => {
+                  console.log('❌ Failed to load profile picture');
+                  // expo-image handles errors gracefully
+                }}
+              />
             ) : (
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>
@@ -245,7 +271,7 @@ const ProfileScreen = ({ navigation }) => {
           </View>
         </Modal>
 
-        {/* Profile Form - SIMPLIFIED */}
+        {/* Profile Form */}
         <View style={styles.form}>
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Display Name</Text>
@@ -470,7 +496,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: '#64748b',
   },
-  // Form Styles - SIMPLIFIED
+  // Form Styles
   form: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -578,4 +604,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ProfileScreen; 
+export default ProfileScreen;

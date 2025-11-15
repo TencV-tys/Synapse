@@ -8,10 +8,11 @@ let isRealSQLite = false;
 function createEnhancedMockDatabase() {
   console.log('🔄 Creating enhanced mock database for React Native');
   
-  // Use in-memory storage for React Native
+  // Use in-memory storage for React Native - ADD CATEGORIES HERE
   const mockData = {
     users: {},
     notes: {},
+    categories: {}, // ✅ ADDED CATEGORIES
     syncQueue: {}
   };
 
@@ -161,6 +162,101 @@ function createEnhancedMockDatabase() {
                 if (successCallback) {
                   successCallback(mockTransaction, {
                     rowsAffected: existed ? 1 : 0,
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
+
+              // ✅ ADD CATEGORIES HANDLING HERE
+              } else if (sqlLower.startsWith('select * from categories where userid = ?')) {
+                // Get categories for user
+                const userId = params[0];
+                const userCategories = Object.values(mockData.categories).filter(cat => cat.userId === userId);
+                console.log('📂 [MOCK] Categories retrieved for user:', userCategories.length);
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: userCategories,
+                      length: userCategories.length,
+                      item: (index) => userCategories[index] || null
+                    }
+                  });
+                }
+                
+              } else if (sqlLower.startsWith('insert or replace into categories')) {
+                // Save category
+                const [id, name, color, userId, createdAt, updatedAt, noteCount, syncStatus] = params;
+                
+                mockData.categories[id] = {
+                  id, 
+                  name, 
+                  color, 
+                  userId,
+                  createdAt: createdAt || new Date().toISOString(),
+                  updatedAt: updatedAt || new Date().toISOString(),
+                  noteCount: noteCount || 0,
+                  syncStatus: syncStatus || 'synced'
+                };
+                console.log('💾 [MOCK] Category saved:', name);
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    insertId: 1,
+                    rowsAffected: 1,
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
+                
+              } else if (sqlLower.startsWith('select * from categories where id = ?')) {
+                // Get category by ID
+                const categoryId = params[0];
+                const category = mockData.categories[categoryId] || null;
+                console.log('📁 [MOCK] Category retrieved by ID:', category ? category.name : 'Not found');
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: category ? [category] : [],
+                      length: category ? 1 : 0,
+                      item: (index) => category ? category : null
+                    }
+                  });
+                }
+                
+              } else if (sqlLower.startsWith('delete from categories where id = ?')) {
+                // Delete category
+                const categoryId = params[0];
+                const existed = mockData.categories.hasOwnProperty(categoryId);
+                delete mockData.categories[categoryId];
+                console.log('🗑️ [MOCK] Category deleted:', categoryId, existed ? '(existed)' : '(did not exist)');
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rowsAffected: existed ? 1 : 0,
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
+                
+              } else if (sqlLower.startsWith('update categories set notecount')) {
+                // Update category note count
+                const [noteCount, updatedAt, categoryId] = params;
+                const category = mockData.categories[categoryId];
+                if (category) {
+                  category.noteCount = noteCount;
+                  category.updatedAt = updatedAt;
+                  console.log('📊 [MOCK] Category note count updated:', categoryId, noteCount);
+                }
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rowsAffected: category ? 1 : 0,
                     rows: {
                       _array: [],
                       length: 0,
@@ -509,18 +605,202 @@ const markNoteForSync = async (noteId, operation, data) => {
   return Promise.resolve();
 };
 
+// Category operations
+const createCategoriesTable = async () => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve();
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        `CREATE TABLE IF NOT EXISTS categories (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          color TEXT NOT NULL,
+          userId TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          updatedAt TEXT NOT NULL,
+          noteCount INTEGER DEFAULT 0,
+          syncStatus TEXT DEFAULT 'synced'
+        )`,
+        [],
+        (tx, result) => {
+          console.log('📊 Categories table ready');
+          resolve(result);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not create categories table:', error);
+          resolve();
+        }
+      );
+    });
+  });
+};
+
+// Initialize categories table when service loads
+createCategoriesTable();
+
+// Category CRUD operations
+const saveCategory = async (category) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve();
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        `INSERT OR REPLACE INTO categories 
+         (id, name, color, userId, createdAt, updatedAt, noteCount, syncStatus) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          category.id,
+          category.name,
+          category.color,
+          category.userId,
+          category.createdAt || new Date().toISOString(),
+          category.updatedAt || new Date().toISOString(),
+          category.noteCount || 0,
+          category.syncStatus || 'synced'
+        ],
+        (tx, result) => {
+          console.log('💾 [MOCK] Category saved:', category.name);
+          resolve(result);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not save category:', error);
+          resolve();
+        }
+      );
+    });
+  });
+};
+
+const getCategories = async (userId) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve([]);
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT * FROM categories WHERE userId = ? ORDER BY name ASC',
+        [userId],
+        (tx, result) => {
+          const categories = result.rows._array || [];
+          console.log('📂 [MOCK] Categories loaded:', categories.length);
+          resolve(categories);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not get categories:', error);
+          resolve([]);
+        }
+      );
+    });
+  });
+};
+
+const getCategoryById = async (categoryId) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve(null);
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT * FROM categories WHERE id = ?',
+        [categoryId],
+        (tx, result) => {
+          const category = result.rows._array[0] || null;
+          console.log('📁 [MOCK] Category found:', category ? category.name : 'Not found');
+          resolve(category);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not get category:', error);
+          resolve(null);
+        }
+      );
+    });
+  });
+};
+
+const deleteCategory = async (categoryId) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve();
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        'DELETE FROM categories WHERE id = ?',
+        [categoryId],
+        (tx, result) => {
+          console.log('🗑️ [MOCK] Category deleted:', categoryId);
+          resolve(result);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not delete category:', error);
+          resolve();
+        }
+      );
+    });
+  });
+};
+
+// Update noteCount for categories
+const updateCategoryNoteCount = async (categoryId, noteCount) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve();
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        'UPDATE categories SET noteCount = ?, updatedAt = ? WHERE id = ?',
+        [noteCount, new Date().toISOString(), categoryId],
+        (tx, result) => {
+          console.log('📊 [MOCK] Category note count updated:', categoryId, noteCount);
+          resolve(result);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not update category note count:', error);
+          resolve();
+        }
+      );
+    });
+  });
+};
+
+// Export everything
 export default {
   saveUser,
   getUser,
   getAllUsers,
   saveNote,
   getNotes,
-  getNoteById, // ✅ Added this function
+  getNoteById,
   deleteNote,
   addToSyncQueue,
   getSyncQueue,
   removeFromSyncQueue,
   markNoteForSync,
+  saveCategory,
+  getCategories,
+  getCategoryById,
+  deleteCategory,
+  updateCategoryNoteCount,
   isInitialized: () => true,
   isRealSQLite: () => isRealSQLite
 };

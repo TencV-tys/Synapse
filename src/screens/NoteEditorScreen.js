@@ -1,4 +1,5 @@
-// src/screens/NoteEditorScreen.js
+  
+// Update src/screens/NoteEditorScreen.js - Add category selection
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -8,36 +9,35 @@ import {
   ScrollView, 
   TouchableOpacity, 
   Alert,
-  ActivityIndicator 
+  ActivityIndicator,
+  Modal,
+  FlatList
 } from 'react-native';
 import { useNotes } from '../context/NotesContext';
 import { useAuth } from '../context/AuthContext';
 
 const NoteEditorScreen = ({ route, navigation }) => {
   const { note: existingNote } = route.params || {};
-  const { createNote, updateNote } = useNotes();
+  const { createNote, updateNote, categories } = useNotes();
   const { user } = useAuth();
   
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [tags, setTags] = useState('');
+  const [categoryId, setCategoryId] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
 
   useEffect(() => {
-    console.log('📱 NoteEditorScreen mounted');
-    console.log('🔄 Existing note:', existingNote ? 'Yes' : 'No');
-    console.log('👤 Current user:', user?.uid);
-    
     if (existingNote) {
       setTitle(existingNote.title);
       setContent(existingNote.content);
       setTags(existingNote.tags?.join(', ') || '');
+      setCategoryId(existingNote.categoryId || null);
     }
-  }, [existingNote, user]);
+  }, [existingNote]);
 
   const handleSave = async () => {
-    console.log('💾 Save button pressed');
-    
     if (!title.trim()) {
       Alert.alert('Error', 'Please enter a title');
       return;
@@ -54,35 +54,23 @@ const NoteEditorScreen = ({ route, navigation }) => {
       title: title.trim(),
       content: content.trim(),
       tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
+      categoryId: categoryId,
     };
 
-    console.log('📝 Saving note data:', noteData);
-
-    // Set navigation timeout as fallback
     const navigationTimeout = setTimeout(() => {
-      console.log('⏰ Navigation timeout triggered - forcing navigation');
       setLoading(false);
       navigation.goBack();
-    }, 5000); // 5 second fallback
+    }, 5000);
 
     try {
       let result;
       if (existingNote) {
-        console.log('✏️ Updating existing note:', existingNote.id);
         result = await updateNote(existingNote.id, noteData);
-        console.log('✅ Note updated successfully');
       } else {
-        console.log('🆕 Creating new note for user:', user.uid);
-        result = await createNote(noteData, user.uid);
-        console.log('✅ Note created successfully');
+        result = await createNote(noteData, categoryId);
       }
       
-      // Clear the timeout since we succeeded
       clearTimeout(navigationTimeout);
-      
-      console.log('🚪 Navigating back immediately...');
-      
-      // Force navigation with a small delay to ensure state updates
       setTimeout(() => {
         navigation.goBack();
       }, 100);
@@ -92,37 +80,36 @@ const NoteEditorScreen = ({ route, navigation }) => {
       clearTimeout(navigationTimeout);
       setLoading(false);
       
-      // Even on error, navigate back but show message
       Alert.alert(
         'Note Saved Offline', 
         'Your note has been saved to offline storage. It will sync when you\'re back online.',
         [
           {
             text: 'OK',
-            onPress: () => {
-              console.log('🚪 Navigating back after offline save');
-              navigation.goBack();
-            }
+            onPress: () => navigation.goBack()
           }
         ]
       );
     }
   };
 
-  const handleCancel = () => {
-    console.log('❌ Cancel button pressed');
-    if (!loading) {
-      navigation.goBack();
-    }
+  const getCurrentCategory = () => {
+    return categories.find(cat => cat.id === categoryId);
+  };
+
+  const handleCategorySelect = (category) => {
+    setCategoryId(category.id);
+    setCategoryModalVisible(false);
+  };
+
+  const handleRemoveCategory = () => {
+    setCategoryId(null);
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={handleCancel}
-          disabled={loading}
-        >
+        <TouchableOpacity onPress={() => navigation.goBack()} disabled={loading}>
           <Text style={[styles.cancelButton, loading && styles.disabledButton]}>
             Cancel
           </Text>
@@ -150,6 +137,27 @@ const NoteEditorScreen = ({ route, navigation }) => {
       </View>
 
       <ScrollView style={styles.editor}>
+        {/* Category Selector */}
+        <TouchableOpacity 
+          style={styles.categorySelector}
+          onPress={() => setCategoryModalVisible(true)}
+        >
+          <Text style={styles.categorySelectorLabel}>
+            {getCurrentCategory() ? `Category: ${getCurrentCategory().name}` : 'Add to Category...'}
+          </Text>
+          <Text style={styles.categorySelectorArrow}>▼</Text>
+        </TouchableOpacity>
+
+        {getCurrentCategory() && (
+          <View style={[styles.selectedCategory, { backgroundColor: getCurrentCategory().color + '20' }]}>
+            <View style={[styles.categoryColor, { backgroundColor: getCurrentCategory().color }]} />
+            <Text style={styles.selectedCategoryText}>{getCurrentCategory().name}</Text>
+            <TouchableOpacity onPress={handleRemoveCategory}>
+              <Text style={styles.removeCategoryText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <TextInput
           style={styles.titleInput}
           placeholder="Note Title"
@@ -180,7 +188,6 @@ const NoteEditorScreen = ({ route, navigation }) => {
           editable={!loading}
         />
 
-        {/* Offline status indicator */}
         <View style={styles.statusContainer}>
           <Text style={styles.statusText}>
             {loading ? '💾 Saving...' : '✅ Ready to save'}
@@ -190,10 +197,52 @@ const NoteEditorScreen = ({ route, navigation }) => {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Category Selection Modal */}
+      <Modal
+        visible={categoryModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setCategoryModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Category</Text>
+            
+            <FlatList
+              data={categories}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.categoryOption}
+                  onPress={() => handleCategorySelect(item)}
+                >
+                  <View style={[styles.categoryOptionColor, { backgroundColor: item.color }]} />
+                  <Text style={styles.categoryOptionName}>{item.name}</Text>
+                  <Text style={styles.categoryOptionCount}>({item.noteCount})</Text>
+                </TouchableOpacity>
+              )}
+              keyExtractor={item => item.id}
+              ListEmptyComponent={
+                <Text style={styles.noCategoriesText}>
+                  No categories yet. Create one in the Categories screen.
+                </Text>
+              }
+            />
+            
+            <TouchableOpacity 
+              style={styles.modalCloseButton}
+              onPress={() => setCategoryModalVisible(false)}
+            >
+              <Text style={styles.modalCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
+// Add these styles to your existing styles
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
@@ -276,6 +325,111 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     lineHeight: 16,
+  },
+
+  categorySelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    marginBottom: 16,
+    backgroundColor: '#f8fafc',
+  },
+  categorySelectorLabel: {
+    fontSize: 16,
+    color: '#64748b',
+  },
+  categorySelectorArrow: {
+    fontSize: 12,
+    color: '#64748b',
+  },
+  selectedCategory: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  categoryColor: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  selectedCategoryText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  removeCategoryText: {
+    fontSize: 16,
+    color: '#ef4444',
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#334155',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  categoryOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  categoryOptionColor: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  categoryOptionName: {
+    flex: 1,
+    fontSize: 16,
+    color: '#334155',
+  },
+  categoryOptionCount: {
+    fontSize: 14,
+    color: '#64748b',
+  },
+  noCategoriesText: {
+    textAlign: 'center',
+    color: '#64748b',
+    fontStyle: 'italic',
+    padding: 20,
+  },
+  modalCloseButton: {
+    padding: 16,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    marginTop: 16,
+  },
+  modalCloseText: {
+    color: '#6366f1',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 

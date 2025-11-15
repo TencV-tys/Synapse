@@ -6,22 +6,27 @@ import {
   StyleSheet, 
   TouchableOpacity, 
   ScrollView, 
-  Image, 
   ActivityIndicator,
   Alert,
   RefreshControl
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useAuth } from '../context/AuthContext';
 import { useNotes } from '../context/NotesContext';
 
 const HomeScreen = ({ navigation }) => {
   const { user, logout } = useAuth();
-  const { notes, pinnedNotes, favorites, loading, syncPendingChanges } = useNotes();
+  const { notes, pinnedNotes, favorites, categories, uncategorizedNotes, loading, syncPendingChanges } = useNotes();
   const [refreshing, setRefreshing] = useState(false);
 
   // Get recent notes (last 3 notes)
   const recentNotes = notes
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    .slice(0, 3);
+
+  // Get top categories (max 3)
+  const topCategories = categories
+    .sort((a, b) => b.noteCount - a.noteCount)
     .slice(0, 3);
 
   const handleLogout = async () => {
@@ -69,19 +74,26 @@ const HomeScreen = ({ navigation }) => {
   }, [syncPendingChanges]);
 
   // Function to navigate to Notes with filter
-  const navigateToFilteredNotes = (filterType) => {
-    console.log('🔍 Navigating to notes with filter:', filterType);
+  const navigateToFilteredNotes = (filterType, categoryId = null) => {
+    console.log('🔍 Navigating to notes with filter:', filterType, categoryId);
     navigation.navigate('Notes', { 
       filter: filterType,
-      filterTitle: getFilterTitle(filterType)
+      categoryId: categoryId,
+      filterTitle: getFilterTitle(filterType, categoryId)
     });
   };
 
-  const getFilterTitle = (filterType) => {
+  const getFilterTitle = (filterType, categoryId = null) => {
+    if (categoryId) {
+      const category = categories.find(cat => cat.id === categoryId);
+      return category ? category.name : 'Category Notes';
+    }
+    
     switch (filterType) {
       case 'all': return 'All Notes';
       case 'pinned': return 'Pinned Notes';
       case 'favorites': return 'Favorite Notes';
+      case 'uncategorized': return 'Uncategorized Notes';
       default: return 'My Notes';
     }
   };
@@ -95,10 +107,10 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  const StatCard = ({ title, value, color, filterType }) => (
+  const StatCard = ({ title, value, color, filterType, categoryId = null }) => (
     <TouchableOpacity 
       style={[styles.statCard, { borderLeftColor: color }]} 
-      onPress={() => navigateToFilteredNotes(filterType)}
+      onPress={() => navigateToFilteredNotes(filterType, categoryId)}
     >
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statTitle}>{title}</Text>
@@ -142,6 +154,28 @@ const HomeScreen = ({ navigation }) => {
     </TouchableOpacity>
   );
 
+  const CategoryPreview = ({ category }) => (
+    <TouchableOpacity 
+      style={[styles.categoryPreview, { borderLeftColor: category.color }]}
+      onPress={() => navigateToFilteredNotes('category', category.id)}
+    >
+      <View style={styles.categoryPreviewHeader}>
+        <View style={styles.categoryColorName}>
+          <View style={[styles.categoryColorDot, { backgroundColor: category.color }]} />
+          <Text style={styles.categoryPreviewName} numberOfLines={1}>
+            {category.name}
+          </Text>
+        </View>
+        <Text style={styles.categoryNoteCount}>
+          {category.noteCount}
+        </Text>
+      </View>
+      <Text style={styles.categoryPreviewSubtitle}>
+        {category.noteCount === 1 ? 'note' : 'notes'}
+      </Text>
+    </TouchableOpacity>
+  );
+
   // Loading state
   if (loading && notes.length === 0) {
     return (
@@ -157,7 +191,17 @@ const HomeScreen = ({ navigation }) => {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           {user?.profilePic ? (
-            <Image source={{ uri: user.profilePic }} style={styles.profilePic} />
+            <Image 
+              source={{ uri: user.profilePic }} 
+              style={styles.profilePic}
+              placeholder={{ blurhash: 'L00p#k00RjRj~qayayay00Rj-;ay' }}
+              contentFit="cover"
+              transition={300}
+              onError={(e) => {
+                console.log('❌ Failed to load profile picture, using placeholder');
+                // The image component will handle the error gracefully
+              }}
+            />
           ) : (
             <View style={styles.profilePicPlaceholder}>
               <Text style={styles.profilePicText}>
@@ -169,7 +213,7 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.welcome}>Welcome back,</Text>
             <Text style={styles.userName}>{user?.name || user?.email}!</Text>
             <Text style={styles.noteCount}>
-              {notes.length} note{notes.length !== 1 ? 's' : ''}
+              {notes.length} note{notes.length !== 1 ? 's' : ''} • {categories.length} categor{categories.length !== 1 ? 'ies' : 'y'}
             </Text>
           </View>
         </View>
@@ -220,6 +264,17 @@ const HomeScreen = ({ navigation }) => {
           />
         </View>
 
+        {uncategorizedNotes.length > 0 && (
+          <View style={styles.uncategorizedSection}>
+            <StatCard 
+              title="Uncategorized" 
+              value={uncategorizedNotes.length} 
+              color="#ef4444"
+              filterType="uncategorized"
+            />
+          </View>
+        )}
+
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.actionsContainer}>
           <TouchableOpacity 
@@ -240,10 +295,10 @@ const HomeScreen = ({ navigation }) => {
 
           <TouchableOpacity 
             style={styles.actionButton}
-            onPress={() => navigation.navigate('DirectMessages')}
+            onPress={() => navigation.navigate('Categories')}
           >
-            <Text style={styles.actionIcon}>💭</Text>
-            <Text style={styles.actionText}>Messages</Text>
+            <Text style={styles.actionIcon}>📁</Text>
+            <Text style={styles.actionText}>Categories</Text>
           </TouchableOpacity>
         </View>
 
@@ -259,6 +314,23 @@ const HomeScreen = ({ navigation }) => {
             <View style={styles.recentNotesContainer}>
               {recentNotes.map((note, index) => (
                 <NotePreview key={note.id || index} note={note} />
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Top Categories Section */}
+        {topCategories.length > 0 && (
+          <View style={styles.categoriesSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Top Categories</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Categories')}>
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.categoriesContainer}>
+              {topCategories.map((category, index) => (
+                <CategoryPreview key={category.id || index} category={category} />
               ))}
             </View>
           </View>
@@ -438,7 +510,7 @@ const styles = StyleSheet.create({
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 30,
+    marginBottom: 15,
   },
   statCard: {
     flex: 1,
@@ -462,6 +534,9 @@ const styles = StyleSheet.create({
   statTitle: {
     fontSize: 12,
     color: '#64748b',
+  },
+  uncategorizedSection: {
+    marginBottom: 15,
   },
   actionsContainer: {
     flexDirection: 'row',
@@ -565,6 +640,55 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94a3b8',
   },
+  categoriesSection: {
+    marginBottom: 30,
+  },
+  categoriesContainer: {
+    gap: 12,
+  },
+  categoryPreview: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  categoryPreviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  categoryColorName: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  categoryColorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  categoryPreviewName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#334155',
+    flex: 1,
+  },
+  categoryNoteCount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1e293b',
+  },
+  categoryPreviewSubtitle: {
+    fontSize: 12,
+    color: '#64748b',
+  },
   chatSection: {
     marginBottom: 30,
   },
@@ -645,4 +769,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default HomeScreen;
+export default HomeScreen; 
