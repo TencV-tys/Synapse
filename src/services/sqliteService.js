@@ -86,19 +86,30 @@ function createEnhancedMockDatabase() {
                 }
                 
               } else if (sqlLower.startsWith('insert or replace into notes')) {
-                // Save note
+                // Save note - handle partial updates by merging with existing data
                 const [id, userId, title, content, tags, isPinned, isFavorite, permission, createdAt, updatedAt, syncStatus] = params;
-                mockData.notes[id] = {
-                  id, userId, title, content, 
-                  tags: typeof tags === 'string' ? JSON.parse(tags) : (tags || []),
-                  isPinned: isPinned === 1,
-                  isFavorite: isFavorite === 1,
-                  permission: permission || 'private',
-                  createdAt: createdAt || new Date().toISOString(),
-                  updatedAt: updatedAt || new Date().toISOString(),
-                  syncStatus: syncStatus || 'synced'
+                
+                // Get existing note data to preserve fields that aren't being updated
+                const existingNote = mockData.notes[id] || {};
+                
+                const updatedNote = {
+                  ...existingNote, // Keep existing fields
+                  id, 
+                  userId: userId || existingNote.userId, // Use new value or keep existing
+                  title: title || existingNote.title || 'Untitled Note', // Use new value or keep existing
+                  content: content || existingNote.content || '', // Use new value or keep existing
+                  tags: typeof tags === 'string' ? JSON.parse(tags) : (tags || existingNote.tags || []),
+                  isPinned: isPinned === 1 ? true : (isPinned === 0 ? false : (existingNote.isPinned || false)),
+                  isFavorite: isFavorite === 1 ? true : (isFavorite === 0 ? false : (existingNote.isFavorite || false)),
+                  permission: permission || existingNote.permission || 'private',
+                  createdAt: createdAt || existingNote.createdAt || new Date().toISOString(),
+                  updatedAt: updatedAt || existingNote.updatedAt || new Date().toISOString(),
+                  syncStatus: syncStatus || existingNote.syncStatus || 'synced'
                 };
-                console.log('💾 [MOCK] Note saved:', title);
+                
+                mockData.notes[id] = updatedNote;
+                console.log('💾 [MOCK] Note saved:', updatedNote.title);
+                
                 if (successCallback) {
                   successCallback(mockTransaction, {
                     insertId: 1,
@@ -122,6 +133,21 @@ function createEnhancedMockDatabase() {
                       _array: userNotes,
                       length: userNotes.length,
                       item: (index) => userNotes[index] || null
+                    }
+                  });
+                }
+                
+              } else if (sqlLower.startsWith('select * from notes where id = ?')) {
+                // Get note by ID
+                const noteId = params[0];
+                const note = mockData.notes[noteId] || null;
+                console.log('📄 [MOCK] Note retrieved by ID:', note ? note.title : 'Not found');
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: note ? [note] : [],
+                      length: note ? 1 : 0,
+                      item: (index) => note ? note : null
                     }
                   });
                 }
@@ -195,7 +221,7 @@ isRealSQLite = false;
 
 console.log('✅ SQLite service initialized with Mock Database');
 
-// In your sqliteService.js - check the saveUser function
+// User operations
 const saveUser = async (user) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -231,6 +257,7 @@ const saveUser = async (user) => {
     });
   });
 };
+
 const getUser = async (uid) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -329,7 +356,6 @@ const saveNote = async (note) => {
   });
 };
 
-// In your sqliteService.js - fix the getNotes function
 const getNotes = async (userId) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -386,6 +412,59 @@ const getNotes = async (userId) => {
   });
 };
 
+const getNoteById = async (noteId) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve(null);
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT * FROM notes WHERE id = ?',
+        [noteId],
+        (tx, result) => {
+          const row = result.rows._array[0] || null;
+          if (row) {
+            let tags = [];
+            // Safely parse tags
+            if (row.tags) {
+              try {
+                if (typeof row.tags === 'string') {
+                  const cleanedTags = row.tags.replace(/[^\w\s",\[\]]/g, '');
+                  tags = JSON.parse(cleanedTags);
+                } else if (Array.isArray(row.tags)) {
+                  tags = row.tags;
+                }
+              } catch (parseError) {
+                console.log('⚠️ Could not parse tags for note:', noteId);
+                tags = [];
+              }
+            }
+            
+            const note = {
+              ...row,
+              tags: tags,
+              isPinned: row.isPinned === 1,
+              isFavorite: row.isFavorite === 1
+            };
+            console.log('📄 [MOCK] Note found by ID:', note.title);
+            resolve(note);
+          } else {
+            console.log('📄 [MOCK] Note not found by ID:', noteId);
+            resolve(null);
+          }
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not get note by ID:', error);
+          resolve(null);
+        }
+      );
+    });
+  });
+};
+
 const deleteNote = async (noteId) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -436,6 +515,7 @@ export default {
   getAllUsers,
   saveNote,
   getNotes,
+  getNoteById, // ✅ Added this function
   deleteNote,
   addToSyncQueue,
   getSyncQueue,
@@ -443,4 +523,4 @@ export default {
   markNoteForSync,
   isInitialized: () => true,
   isRealSQLite: () => isRealSQLite
-}; 
+};

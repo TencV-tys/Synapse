@@ -1,12 +1,23 @@
 // src/screens/HomeScreen.js
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  ScrollView, 
+  Image, 
+  ActivityIndicator,
+  Alert,
+  RefreshControl
+} from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useNotes } from '../context/NotesContext';
 
 const HomeScreen = ({ navigation }) => {
   const { user, logout } = useAuth();
-  const { notes, pinnedNotes, favorites } = useNotes();
+  const { notes, pinnedNotes, favorites, loading, syncPendingChanges } = useNotes();
+  const [refreshing, setRefreshing] = useState(false);
 
   // Get recent notes (last 3 notes)
   const recentNotes = notes
@@ -15,11 +26,47 @@ const HomeScreen = ({ navigation }) => {
 
   const handleLogout = async () => {
     try {
-      await logout();
+      Alert.alert(
+        'Logout',
+        'Are you sure you want to logout?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Logout',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await logout();
+              } catch (error) {
+                console.error('Logout error:', error);
+                Alert.alert('Error', 'Failed to logout. Please try again.');
+              }
+            },
+          },
+        ]
+      );
     } catch (error) {
       console.error('Logout error:', error);
     }
   };
+
+  // Pull to refresh function
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      console.log('🔄 Manual refresh triggered');
+      await syncPendingChanges();
+      // Simulate network request
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [syncPendingChanges]);
 
   // Function to navigate to Notes with filter
   const navigateToFilteredNotes = (filterType) => {
@@ -39,6 +86,15 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
+  const handleProfilePress = () => {
+    try {
+      navigation.navigate('Profile');
+    } catch (error) {
+      console.error('Navigation error:', error);
+      Alert.alert('Error', 'Cannot open profile at this time');
+    }
+  };
+
   const StatCard = ({ title, value, color, filterType }) => (
     <TouchableOpacity 
       style={[styles.statCard, { borderLeftColor: color }]} 
@@ -54,17 +110,47 @@ const HomeScreen = ({ navigation }) => {
       style={styles.notePreview}
       onPress={() => navigation.navigate('NoteEditor', { note })}
     >
-      <Text style={styles.notePreviewTitle} numberOfLines={1}>
-        {note.title || 'Untitled Note'}
-      </Text>
+      <View style={styles.notePreviewHeader}>
+        <Text style={styles.notePreviewTitle} numberOfLines={1}>
+          {note.title || 'Untitled Note'}
+        </Text>
+        <View style={styles.noteIndicators}>
+          {note.isPinned && <Text style={styles.pinIndicator}>📌</Text>}
+          {note.isFavorite && <Text style={styles.favIndicator}>⭐</Text>}
+        </View>
+      </View>
       <Text style={styles.notePreviewContent} numberOfLines={2}>
         {note.content || 'No content'}
       </Text>
-      <Text style={styles.notePreviewDate}>
-        {new Date(note.updatedAt).toLocaleDateString()}
-      </Text>
+      <View style={styles.notePreviewFooter}>
+        {note.tags && note.tags.length > 0 && (
+          <View style={styles.tagsContainer}>
+            {note.tags.slice(0, 2).map((tag, index) => (
+              <Text key={index} style={styles.tag} numberOfLines={1}>
+                #{tag}
+              </Text>
+            ))}
+            {note.tags.length > 2 && (
+              <Text style={styles.moreTags}>+{note.tags.length - 2}</Text>
+            )}
+          </View>
+        )}
+        <Text style={styles.notePreviewDate}>
+          {new Date(note.updatedAt).toLocaleDateString()}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
+
+  // Loading state
+  if (loading && notes.length === 0) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#6366f1" />
+        <Text style={styles.loadingText}>Loading your notes...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -82,12 +168,15 @@ const HomeScreen = ({ navigation }) => {
           <View style={styles.welcomeContainer}>
             <Text style={styles.welcome}>Welcome back,</Text>
             <Text style={styles.userName}>{user?.name || user?.email}!</Text>
+            <Text style={styles.noteCount}>
+              {notes.length} note{notes.length !== 1 ? 's' : ''}
+            </Text>
           </View>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity 
             style={styles.profileButton}
-            onPress={() => navigation.navigate('Profile')}
+            onPress={handleProfilePress}
           >
             <Text style={styles.profileButtonText}>👤</Text>
           </TouchableOpacity>
@@ -97,7 +186,18 @@ const HomeScreen = ({ navigation }) => {
         </View>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView 
+        style={styles.content}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={['#6366f1']}
+            tintColor="#6366f1"
+          />
+        }
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.sectionTitle}>Quick Stats</Text>
         <View style={styles.statsContainer}>
           <StatCard 
@@ -227,6 +327,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -272,6 +383,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  noteCount: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
   },
   headerActions: {
     flexDirection: 'row',
@@ -391,17 +507,59 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  notePreviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
   notePreviewTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#334155',
-    marginBottom: 6,
+    flex: 1,
+    marginRight: 8,
+  },
+  noteIndicators: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  pinIndicator: {
+    fontSize: 12,
+  },
+  favIndicator: {
+    fontSize: 12,
   },
   notePreviewContent: {
     fontSize: 14,
     color: '#64748b',
-    marginBottom: 8,
+    marginBottom: 12,
     lineHeight: 18,
+  },
+  notePreviewFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  tag: {
+    fontSize: 11,
+    color: '#6366f1',
+    backgroundColor: '#e0e7ff',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginRight: 4,
+  },
+  moreTags: {
+    fontSize: 11,
+    color: '#94a3b8',
+    fontStyle: 'italic',
   },
   notePreviewDate: {
     fontSize: 12,
@@ -487,4 +645,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default HomeScreen;  
+export default HomeScreen;

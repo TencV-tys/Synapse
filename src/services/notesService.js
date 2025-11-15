@@ -61,41 +61,88 @@ export const notesService = {
       throw new Error('Failed to create note: ' + error.message);
     }
   },
+ // Update existing note with offline support
+async updateNote(noteId, updates) {
+  try {
+    const updatedNote = {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+      syncStatus: 'synced'
+    };
 
-  // Update existing note with offline support
-  async updateNote(noteId, updates) {
+    console.log('✏️ Updating note:', noteId, 'Updates:', updates);
+
+    // Try Firebase first
     try {
-      const updatedNote = {
-        ...updates,
-        updatedAt: new Date().toISOString(),
-        syncStatus: 'synced'
-      };
-
-      console.log('✏️ Updating note:', noteId);
-
-      // Try Firebase first
-      try {
-        const noteRef = doc(firestore, 'notes', noteId);
-        await updateDoc(noteRef, updatedNote);
-        console.log('✅ Note updated in Firebase:', noteId);
-      } catch (firebaseError) {
-        console.log('🌐 Offline - updating local note only');
-        updatedNote.syncStatus = 'pending';
-        
-        // Add to sync queue
-        await sqliteService.markNoteForSync(noteId, 'UPDATE', updatedNote);
-      }
-
-      // Always update SQLite
-      await sqliteService.saveNote({ id: noteId, ...updatedNote });
-      console.log('💾 Note updated in local storage');
+      const noteRef = doc(firestore, 'notes', noteId);
+      await updateDoc(noteRef, updatedNote);
+      console.log('✅ Note updated in Firebase:', noteId);
+    } catch (firebaseError) {
+      console.log('🌐 Offline - updating local note only');
+      updatedNote.syncStatus = 'pending';
       
-    } catch (error) {
-      console.error('❌ Error updating note:', error);
-      throw new Error('Failed to update note: ' + error.message);
+      // Add to sync queue
+      await sqliteService.markNoteForSync(noteId, 'UPDATE', updatedNote);
     }
-  },
 
+    // For SQLite, we need to get the full note data first to ensure we have all fields
+    try {
+      const currentNote = await sqliteService.getNoteById(noteId);
+      if (currentNote) {
+        // Merge updates with existing note data to preserve all fields
+        const mergedNote = {
+          ...currentNote,
+          ...updatedNote, // This overwrites only the updated fields
+          id: noteId // Ensure ID is preserved
+        };
+        await sqliteService.saveNote(mergedNote);
+        console.log('💾 Note updated in local storage with full data:', mergedNote.title);
+      } else {
+        // If note doesn't exist in SQLite, create a minimal version
+        const minimalNote = {
+          id: noteId,
+          title: 'Untitled Note',
+          content: '',
+          tags: [],
+          isPinned: false,
+          isFavorite: false,
+          userId: '', // This should ideally come from somewhere
+          permission: 'private',
+          createdAt: new Date().toISOString(),
+          updatedAt: updatedNote.updatedAt,
+          syncStatus: updatedNote.syncStatus,
+          ...updates
+        };
+        await sqliteService.saveNote(minimalNote);
+        console.log('💾 Note created in local storage (fallback):', minimalNote.title);
+      }
+    } catch (sqliteError) {
+      console.error('❌ Error updating note in SQLite:', sqliteError);
+      // Final fallback - just save what we have
+      const fallbackNote = {
+        id: noteId,
+        title: 'Untitled Note',
+        content: '',
+        tags: [],
+        isPinned: false,
+        isFavorite: false,
+        userId: '',
+        permission: 'private',
+        createdAt: new Date().toISOString(),
+        updatedAt: updatedNote.updatedAt,
+        syncStatus: updatedNote.syncStatus,
+        ...updates
+      };
+      await sqliteService.saveNote(fallbackNote);
+      console.log('💾 Note saved with fallback data:', fallbackNote.title);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error updating note:', error);
+    throw new Error('Failed to update note: ' + error.message);
+  }
+},
+  
   // Delete note with offline support
   async deleteNote(noteId) {
     try {
@@ -222,26 +269,31 @@ export const notesService = {
   },
 
   // Real-time notes listener with SQLite caching
-  subscribeToUserNotes(userId, callback) {
-    console.log('🎯 Setting up Firestore real-time listener for user:', userId);
-    
-    try {
-      const q = query(
-        collection(firestore, 'notes'),
-        where('userId', '==', userId)
-      );
+subscribeToUserNotes(userId, callback) {
+  console.log('🎯 Setting up Firestore real-time listener for user:', userId);
+  
+  try {
+    const q = query(
+      collection(firestore, 'notes'),
+      where('userId', '==', userId)
+    );
 
-      const unsubscribe = onSnapshot(q, 
-        // Success callback
-        async (snapshot) => {
-          const notes = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            syncStatus: 'synced'
-          }));
-          
-          console.log('🔥 Firestore real-time update - notes:', notes.length);
-          
+    let isFirstSnapshot = true;
+    
+    const unsubscribe = onSnapshot(q, 
+      // Success callback
+      async (snapshot) => {
+        const notes = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          syncStatus: 'synced'
+        }));
+        
+        console.log('🔥 Firestore real-time update - notes:', notes.length);
+        
+        // Only save to SQLite if this is NOT the first snapshot
+        // (first load is already handled by getUserNotes)
+        if (!isFirstSnapshot) {
           // Save all notes to SQLite for offline access
           const savePromises = notes.map(note => 
             sqliteService.saveNote(note).catch(e => 
@@ -249,55 +301,59 @@ export const notesService = {
             )
           );
           await Promise.all(savePromises);
-          
-          // Sort by most recent first
-          const sortedNotes = notes.sort((a, b) => 
-            new Date(b.updatedAt) - new Date(a.updatedAt)
-          );
-          
-          callback(sortedNotes);
-        },
-        
-        // Error callback
-        async (error) => {
-          console.error('❌ Firestore listener error, falling back to SQLite:', error);
-          
-          try {
-            // Fallback to SQLite
-            const notes = await sqliteService.getNotes(userId);
-            const sortedNotes = notes.sort((a, b) => 
-              new Date(b.updatedAt) - new Date(a.updatedAt)
-            );
-            callback(sortedNotes);
-          } catch (sqliteError) {
-            console.error('❌ SQLite fallback also failed:', sqliteError);
-            callback([]);
-          }
+        } else {
+          console.log('📱 First snapshot - skipping SQLite save (already handled by initial load)');
+          isFirstSnapshot = false;
         }
-      );
-
-      return unsubscribe;
-
-    } catch (error) {
-      console.error('❌ Error setting up Firestore listener:', error);
+        
+        // Sort by most recent first
+        const sortedNotes = notes.sort((a, b) => 
+          new Date(b.updatedAt) - new Date(a.updatedAt)
+        );
+        
+        callback(sortedNotes);
+      },
       
-      // Immediate fallback to SQLite
-      sqliteService.getNotes(userId)
-        .then(notes => {
+      // Error callback
+      async (error) => {
+        console.error('❌ Firestore listener error, falling back to SQLite:', error);
+        
+        try {
+          // Fallback to SQLite
+          const notes = await sqliteService.getNotes(userId);
           const sortedNotes = notes.sort((a, b) => 
             new Date(b.updatedAt) - new Date(a.updatedAt)
           );
           callback(sortedNotes);
-        })
-        .catch(error => {
-          console.error('❌ SQLite fallback failed:', error);
+        } catch (sqliteError) {
+          console.error('❌ SQLite fallback also failed:', sqliteError);
           callback([]);
-        });
+        }
+      }
+    );
 
-      // Return a dummy unsubscribe function
-      return () => console.log('📡 Listener unsubscribed');
-    }
-  },
+    return unsubscribe;
+
+  } catch (error) {
+    console.error('❌ Error setting up Firestore listener:', error);
+    
+    // Immediate fallback to SQLite
+    sqliteService.getNotes(userId)
+      .then(notes => {
+        const sortedNotes = notes.sort((a, b) => 
+          new Date(b.updatedAt) - new Date(a.updatedAt)
+        );
+        callback(sortedNotes);
+      })
+      .catch(error => {
+        console.error('❌ SQLite fallback failed:', error);
+        callback([]);
+      });
+
+    // Return a dummy unsubscribe function
+    return () => console.log('📡 Listener unsubscribed');
+  }
+},
 
   // Search notes across title, content, and tags
   async searchNotes(userId, searchTerm) {
