@@ -13,30 +13,49 @@ import {
 } from 'react-native';
 import { useNotes } from '../context/NotesContext';
 import { useAuth } from '../context/AuthContext';
+import ShareModal from '../components/ShareModal'; // Add this import
 
 const NotesScreen = ({ route, navigation }) => {
-  const { notes, deleteNote, togglePin, toggleFavorite, searchNotes, loading, syncPendingChanges } = useNotes();
+  const { 
+    notes, 
+    deleteNote, 
+    togglePin, 
+    toggleFavorite, 
+    searchNotes, 
+    loading, 
+    syncPendingChanges,
+    getNotesByCategory,
+    getCategoryById
+  } = useNotes();
+  
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredNotes, setFilteredNotes] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false); // Add this state
+  const [selectedNote, setSelectedNote] = useState(null); // Add this state
  
   // Get filter from navigation params
-  const { filter, filterTitle } = route.params || {};
+  const { filter, filterTitle, categoryId } = route.params || {};
 
-  // Apply filters when notes or filter changes
+  // Apply filters when notes or filter changes 
   useEffect(() => {
-    console.log('🔄 Applying filter:', filter || 'all');
-    setActiveFilter(filter || 'all');
+    console.log('🔄 Applying filter:', filter || 'all', 'Category ID:', categoryId);
+    setActiveFilter(filter || 'all'); 
     
-    applyFilters(filter || 'all', searchQuery);
+    applyFilters(filter || 'all', searchQuery, categoryId);
     
     // Update header title based on filter
     if (filterTitle) {
       navigation.setOptions({ title: filterTitle });
+    } else if (categoryId) {
+      const category = getCategoryById(categoryId);
+      if (category) {
+        navigation.setOptions({ title: category.name });
+      }
     }
-  }, [notes, filter, searchQuery]);
+  }, [notes, filter, searchQuery, categoryId]);
 
   // Pull to refresh function
   const onRefresh = useCallback(async () => {
@@ -53,22 +72,38 @@ const NotesScreen = ({ route, navigation }) => {
     }
   }, [syncPendingChanges]);
 
-  const applyFilters = (filterType, query = '') => {
+  const applyFilters = (filterType, query = '', catId = null) => {
     let filtered = notes;
+    
+    console.log('🎯 Starting filter application:', {
+      filterType,
+      query,
+      catId,
+      totalNotes: notes.length
+    });
+
+    // Apply category filter first (if specified)
+    if (catId) {
+      filtered = getNotesByCategory(catId);
+      console.log(`📁 Category filtered notes: ${filtered.length} for category ${catId}`);
+    }
     
     // Apply main filter
     switch (filterType) {
       case 'pinned':
-        filtered = notes.filter(note => note.isPinned);
+        filtered = filtered.filter(note => note.isPinned);
         console.log(`📌 Pinned notes: ${filtered.length}`);
         break;
       case 'favorites':
-        filtered = notes.filter(note => note.isFavorite);
+        filtered = filtered.filter(note => note.isFavorite);
         console.log(`⭐ Favorite notes: ${filtered.length}`);
+        break;
+      case 'uncategorized':
+        filtered = filtered.filter(note => !note.categoryId);
+        console.log(`📄 Uncategorized notes: ${filtered.length}`);
         break;
       case 'all':
       default:
-        filtered = notes;
         console.log(`📚 All notes: ${filtered.length}`);
         break;
     }
@@ -82,6 +117,7 @@ const NotesScreen = ({ route, navigation }) => {
       console.log(`🔍 Search results: ${filtered.length} notes`);
     }
     
+    console.log('✅ Final filtered notes count:', filtered.length);
     setFilteredNotes(filtered);
   };
 
@@ -116,111 +152,174 @@ const NotesScreen = ({ route, navigation }) => {
     toggleFavorite(noteId);
   };
 
-  const clearFilters = () => {
-    setSearchQuery('');
-    navigation.setParams({ filter: 'all', filterTitle: 'My Notes' });
+  // Add share note function
+  const handleShareNote = (note) => {
+    if (note.permission !== 'view_only') {
+      Alert.alert(
+        'Private Note',
+        'Only public notes (View Only) can be shared. Change the note permission to "Public" to share it.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    setSelectedNote(note);
+    setShareModalVisible(true);
   };
 
-  const NoteCard = ({ note }) => (
-    <TouchableOpacity 
-      style={styles.noteCard}
-      onPress={() => navigation.navigate('NoteEditor', { note })}
-      onLongPress={() => {
-        Alert.alert(
-          'Note Actions',
-          `What would you like to do with "${note.title}"?`,
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-            },
-            {
-              text: note.isPinned ? 'Unpin' : 'Pin',
-              onPress: () => handleTogglePin(note.id),
-            },
-            {
-              text: note.isFavorite ? 'Remove from Favorites' : 'Add to Favorites',
-              onPress: () => handleToggleFavorite(note.id),
-            },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: () => handleDeleteNote(note.id, note.title),
-            },
-          ]
-        );
-      }}
-    >
-      <View style={styles.noteHeader}>
-        <Text style={styles.noteTitle}>{note.title}</Text>
-        <View style={styles.noteActions}>
-          {/* Favorite Button */}
-          <TouchableOpacity 
-            onPress={(e) => {
-              e.stopPropagation();
-              handleToggleFavorite(note.id);
-            }}
-            style={styles.actionButton}
-          >
-            <Text style={[
-              styles.favoriteIcon,
-              note.isFavorite && styles.favoriteIconActive
-            ]}>
-              {note.isFavorite ? '⭐' : '☆'}
-            </Text>
-          </TouchableOpacity>
-          
-          {/* Pin Button */}
-          <TouchableOpacity 
-            onPress={(e) => {
-              e.stopPropagation();
-              handleTogglePin(note.id);
-            }}
-            style={styles.actionButton}
-          >
-            <Text style={[
-              styles.pinIcon,
-              note.isPinned && styles.pinIconActive
-            ]}>
-              {note.isPinned ? '📌' : '📍'}
-            </Text>
-          </TouchableOpacity>
-          
-          {/* Delete Button */}
-          <TouchableOpacity 
-            onPress={(e) => {
-              e.stopPropagation();
-              handleDeleteNote(note.id, note.title);
-            }}
-            style={styles.actionButton}
-          >
-            <Text style={styles.deleteIcon}>🗑️</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-      
-      <Text style={styles.noteContent} numberOfLines={3}>
-        {note.content}
-      </Text>
-      
-      <View style={styles.noteFooter}>
-        <View style={styles.tagsContainer}>
-          {note.tags?.map((tag, index) => (
-            <Text key={index} style={styles.tag}>{tag}</Text>
-          ))}
-        </View>
-        <Text style={styles.dateText}>
-          {new Date(note.updatedAt).toLocaleDateString()}
-        </Text>
-      </View>
+  const closeShareModal = () => {
+    setShareModalVisible(false);
+    setSelectedNote(null);
+  };
 
-      {/* Status indicators */}
-      <View style={styles.statusIndicators}>
-        {note.isPinned && <Text style={styles.statusPinned}>📌 Pinned</Text>}
-        {note.isFavorite && <Text style={styles.statusFavorite}>⭐ Favorite</Text>}
-      </View>
-    </TouchableOpacity>
-  );
+  const clearFilters = () => {
+    setSearchQuery('');
+    navigation.setParams({ 
+      filter: 'all', 
+      filterTitle: 'My Notes',
+      categoryId: null 
+    });
+  };
+
+  const NoteCard = ({ note }) => {
+    const category = note.categoryId ? getCategoryById(note.categoryId) : null;
+    
+    return (
+      <TouchableOpacity 
+        style={styles.noteCard}
+        onPress={() => navigation.navigate('NoteEditor', { note })}
+        onLongPress={() => {
+          Alert.alert(
+            'Note Actions',
+            `What would you like to do with "${note.title}"?`,
+            [
+              {
+                text: 'Cancel',
+                style: 'cancel',
+              },
+              {
+                text: note.isPinned ? 'Unpin' : 'Pin',
+                onPress: () => handleTogglePin(note.id),
+              },
+              {
+                text: note.isFavorite ? 'Remove from Favorites' : 'Add to Favorites',
+                onPress: () => handleToggleFavorite(note.id),
+              },
+              {
+                text: 'Share',
+                onPress: () => handleShareNote(note),
+              },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: () => handleDeleteNote(note.id, note.title),
+              },
+            ]
+          );
+        }}
+      >
+        <View style={styles.noteHeader}>
+          <Text style={styles.noteTitle}>{note.title}</Text>
+          <View style={styles.noteActions}>
+            {/* Share Button - Only show for public notes */}
+            {note.permission === 'view_only' && (
+              <TouchableOpacity 
+                onPress={(e) => {
+                  e.stopPropagation();
+                  handleShareNote(note);
+                }}
+                style={styles.actionButton}
+              >
+                <Text style={styles.shareIcon}>📤</Text>
+              </TouchableOpacity>
+            )}
+            
+            {/* Favorite Button */}
+            <TouchableOpacity 
+              onPress={(e) => {
+                e.stopPropagation();
+                handleToggleFavorite(note.id);
+              }}
+              style={styles.actionButton}
+            >
+              <Text style={[
+                styles.favoriteIcon,
+                note.isFavorite && styles.favoriteIconActive
+              ]}>
+                {note.isFavorite ? '⭐' : '☆'}
+              </Text>
+            </TouchableOpacity>
+            
+            {/* Pin Button */}
+            <TouchableOpacity 
+              onPress={(e) => {
+                e.stopPropagation();
+                handleTogglePin(note.id);
+              }}
+              style={styles.actionButton}
+            >
+              <Text style={[
+                styles.pinIcon,
+                note.isPinned && styles.pinIconActive
+              ]}>
+                {note.isPinned ? '📌' : '📍'}
+              </Text>
+            </TouchableOpacity>
+            
+            {/* Delete Button */}
+            <TouchableOpacity 
+              onPress={(e) => {
+                e.stopPropagation();
+                handleDeleteNote(note.id, note.title);
+              }}
+              style={styles.actionButton}
+            >
+              <Text style={styles.deleteIcon}>🗑️</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        
+        <Text style={styles.noteContent} numberOfLines={3}>
+          {note.content}
+        </Text>
+        
+        <View style={styles.noteFooter}>
+          <View style={styles.tagsContainer}>
+            {/* Category Badge */}
+            {category && (
+              <View style={[styles.categoryBadge, { backgroundColor: category.color }]}>
+                <Text style={styles.categoryText}>{category.name}</Text>
+              </View>
+            )}
+            
+            {/* Permission Badge */}
+            <View style={[
+              styles.permissionBadge,
+              note.permission === 'view_only' ? styles.publicBadge : styles.privateBadge
+            ]}>
+              <Text style={styles.permissionText}>
+                {note.permission === 'view_only' ? '👁️ Public' : '🔒 Private'}
+              </Text>
+            </View>
+            
+            {/* Tags */}
+            {note.tags?.map((tag, index) => (
+              <Text key={`${note.id}_tag_${index}`} style={styles.tag}>{tag}</Text>
+            ))}
+          </View>
+          <Text style={styles.dateText}>
+            {new Date(note.updatedAt).toLocaleDateString()}
+          </Text>
+        </View>
+
+        {/* Status indicators */}
+        <View style={styles.statusIndicators}>
+          {note.isPinned && <Text style={styles.statusPinned}>📌 Pinned</Text>}
+          {note.isFavorite && <Text style={styles.statusFavorite}>⭐ Favorite</Text>}
+          {!note.categoryId && <Text style={styles.statusUncategorized}>📄 Uncategorized</Text>}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   if (loading && notes.length === 0) {
     return (
@@ -233,10 +332,28 @@ const NotesScreen = ({ route, navigation }) => {
 
   const displayNotes = searchQuery ? filteredNotes : (filteredNotes.length > 0 ? filteredNotes : notes);
 
+  // Get current category info for display
+  const currentCategory = categoryId ? getCategoryById(categoryId) : null;
+
+  // Fix for duplicate keys - create unique keys for each item
+  const getUniqueKey = (item, index) => {
+    // Use a combination of ID and index to ensure uniqueness
+    return `${item.id}_${index}`;
+  };
+
   return (
     <View style={styles.container}>
       {/* Filter and Search Header */}
       <View style={styles.filterHeader}>
+        {/* Category Info Banner */}
+        {currentCategory && (
+          <View style={[styles.categoryBanner, { backgroundColor: currentCategory.color }]}>
+            <Text style={styles.categoryBannerText}>
+              📁 {currentCategory.name} • {filteredNotes.length} note{filteredNotes.length !== 1 ? 's' : ''}
+            </Text>
+          </View>
+        )}
+
         <View style={styles.searchContainer}>
           <TextInput
             style={styles.searchInput}
@@ -244,7 +361,7 @@ const NotesScreen = ({ route, navigation }) => {
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
-          {(searchQuery || activeFilter !== 'all') && (
+          {(searchQuery || activeFilter !== 'all' || categoryId) && (
             <TouchableOpacity style={styles.clearButton} onPress={clearFilters}>
               <Text style={styles.clearButtonText}>Clear</Text>
             </TouchableOpacity>
@@ -252,10 +369,12 @@ const NotesScreen = ({ route, navigation }) => {
         </View>
 
         {/* Active Filter Indicator */}
-        {activeFilter !== 'all' && (
+        {activeFilter !== 'all' && !categoryId && (
           <View style={styles.filterIndicator}>
             <Text style={styles.filterText}>
-              Showing: {activeFilter === 'pinned' ? '📌 Pinned' : '⭐ Favorites'} 
+              Showing: {activeFilter === 'pinned' ? '📌 Pinned' : 
+                       activeFilter === 'favorites' ? '⭐ Favorites' :
+                       activeFilter === 'uncategorized' ? '📄 Uncategorized' : 'All'} 
               ({filteredNotes.length} notes)
             </Text>
           </View>
@@ -265,21 +384,28 @@ const NotesScreen = ({ route, navigation }) => {
       {displayNotes.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>
-            {activeFilter === 'pinned' ? '📌' : activeFilter === 'favorites' ? '⭐' : '📝'}
+            {categoryId ? '📁' :
+             activeFilter === 'pinned' ? '📌' : 
+             activeFilter === 'favorites' ? '⭐' : 
+             activeFilter === 'uncategorized' ? '📄' : '📝'}
           </Text>
           <Text style={styles.emptyTitle}>
             {searchQuery ? 'No matching notes' : 
+             categoryId ? `No notes in ${currentCategory?.name || 'this category'}` :
              activeFilter === 'pinned' ? 'No pinned notes' :
              activeFilter === 'favorites' ? 'No favorite notes' :
+             activeFilter === 'uncategorized' ? 'No uncategorized notes' :
              'No notes yet'}
           </Text>
           <Text style={styles.emptyText}>
             {searchQuery ? 'Try a different search term' :
+             categoryId ? 'Add notes to this category to see them here' :
              activeFilter === 'pinned' ? 'Pin important notes to see them here' :
              activeFilter === 'favorites' ? 'Mark notes as favorites to see them here' :
+             activeFilter === 'uncategorized' ? 'All your notes without categories will appear here' :
              'Create your first note by tapping the + button below!'}
           </Text>
-          {(searchQuery || activeFilter !== 'all') && (
+          {(searchQuery || activeFilter !== 'all' || categoryId) && (
             <TouchableOpacity style={styles.clearAllButton} onPress={clearFilters}>
               <Text style={styles.clearAllButtonText}>Show All Notes</Text>
             </TouchableOpacity>
@@ -288,8 +414,8 @@ const NotesScreen = ({ route, navigation }) => {
       ) : (
         <FlatList
           data={displayNotes}
-          renderItem={({ item }) => <NoteCard note={item} />}
-          keyExtractor={item => item.id}
+          renderItem={({ item, index }) => <NoteCard note={item} />}
+          keyExtractor={(item, index) => `${item.id}_${index}`}
           contentContainerStyle={styles.notesList}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -300,12 +426,17 @@ const NotesScreen = ({ route, navigation }) => {
               tintColor="#6366f1"
             />
           }
+          extraData={displayNotes.length} // Force re-render when data changes
         />
       )}
 
       <TouchableOpacity 
         style={styles.fab}
-        onPress={() => navigation.navigate('NoteEditor', { note: null })}
+        onPress={() => navigation.navigate('NoteEditor', { 
+          note: null,
+          // Pre-select category if we're in a category view
+          initialCategoryId: categoryId 
+        })}
       >
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
@@ -316,6 +447,14 @@ const NotesScreen = ({ route, navigation }) => {
       >
         <Text style={styles.chatButtonText}>💬</Text>
       </TouchableOpacity>
+
+      {/* Share Modal */}
+      <ShareModal
+        visible={shareModalVisible}
+        onClose={closeShareModal}
+        note={selectedNote}
+        navigation={navigation}
+      />
     </View>
   );
 };
@@ -327,6 +466,17 @@ const styles = StyleSheet.create({
     padding: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
+  },
+  categoryBanner: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  categoryBannerText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -393,7 +543,11 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     padding: 5,
-    marginLeft: 10,
+    marginLeft: 8,
+  },
+  shareIcon: {
+    fontSize: 16,
+    opacity: 0.7,
   },
   favoriteIcon: {
     fontSize: 16,
@@ -428,6 +582,42 @@ const styles = StyleSheet.create({
     flexDirection: 'row', 
     flexWrap: 'wrap',
     flex: 1,
+    alignItems: 'center',
+  },
+  categoryBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 5,
+    marginBottom: 5,
+  },
+  categoryText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  permissionBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginRight: 5,
+    marginBottom: 5,
+  },
+  publicBadge: {
+    backgroundColor: '#dbeafe',
+  },
+  privateBadge: {
+    backgroundColor: '#f3f4f6',
+  },
+  permissionText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  publicBadgeText: {
+    color: '#1e40af',
+  },
+  privateBadgeText: {
+    color: '#6b7280',
   },
   tag: {
     backgroundColor: '#e0e7ff',
@@ -448,6 +638,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 8,
     gap: 10,
+    flexWrap: 'wrap',
   },
   statusPinned: {
     fontSize: 11,
@@ -461,6 +652,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#f59e0b',
     backgroundColor: '#fef3c7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  statusUncategorized: {
+    fontSize: 11,
+    color: '#6b7280',
+    backgroundColor: '#f3f4f6',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 8,

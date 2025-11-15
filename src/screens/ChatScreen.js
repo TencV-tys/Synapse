@@ -784,7 +784,7 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#f8fafc', 
     borderWidth: 1,
     borderColor: '#e2e8f0',
     borderRadius: 25,

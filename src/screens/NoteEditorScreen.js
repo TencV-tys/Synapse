@@ -1,5 +1,4 @@
-  
-// Update src/screens/NoteEditorScreen.js - Add category selection
+// src/screens/NoteEditorScreen.js
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -17,7 +16,7 @@ import { useNotes } from '../context/NotesContext';
 import { useAuth } from '../context/AuthContext';
 
 const NoteEditorScreen = ({ route, navigation }) => {
-  const { note: existingNote } = route.params || {};
+  const { note: existingNote, initialCategoryId } = route.params || {};
   const { createNote, updateNote, categories } = useNotes();
   const { user } = useAuth();
   
@@ -25,6 +24,7 @@ const NoteEditorScreen = ({ route, navigation }) => {
   const [content, setContent] = useState('');
   const [tags, setTags] = useState('');
   const [categoryId, setCategoryId] = useState(null);
+  const [isPublic, setIsPublic] = useState(false);
   const [loading, setLoading] = useState(false);
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
 
@@ -34,8 +34,11 @@ const NoteEditorScreen = ({ route, navigation }) => {
       setContent(existingNote.content);
       setTags(existingNote.tags?.join(', ') || '');
       setCategoryId(existingNote.categoryId || null);
+      setIsPublic(existingNote.permission === 'view_only');
+    } else if (initialCategoryId) {
+      setCategoryId(initialCategoryId);
     }
-  }, [existingNote]);
+  }, [existingNote, initialCategoryId]);
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -55,29 +58,22 @@ const NoteEditorScreen = ({ route, navigation }) => {
       content: content.trim(),
       tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
       categoryId: categoryId,
+      permission: isPublic ? 'view_only' : 'private',
     };
 
-    const navigationTimeout = setTimeout(() => {
-      setLoading(false);
-      navigation.goBack();
-    }, 5000);
-
     try {
-      let result;
       if (existingNote) {
-        result = await updateNote(existingNote.id, noteData);
+        await updateNote(existingNote.id, noteData);
       } else {
-        result = await createNote(noteData, categoryId);
+        await createNote(noteData, categoryId);
       }
       
-      clearTimeout(navigationTimeout);
       setTimeout(() => {
         navigation.goBack();
       }, 100);
       
     } catch (error) {
       console.error('❌ Error saving note:', error);
-      clearTimeout(navigationTimeout);
       setLoading(false);
       
       Alert.alert(
@@ -104,6 +100,10 @@ const NoteEditorScreen = ({ route, navigation }) => {
 
   const handleRemoveCategory = () => {
     setCategoryId(null);
+  };
+
+  const togglePrivacy = () => {
+    setIsPublic(!isPublic);
   };
 
   return (
@@ -137,6 +137,24 @@ const NoteEditorScreen = ({ route, navigation }) => {
       </View>
 
       <ScrollView style={styles.editor}>
+        {/* Privacy Toggle */}
+        <TouchableOpacity 
+          style={styles.privacyToggle}
+          onPress={togglePrivacy}
+        >
+          <View style={styles.privacyInfo}>
+            <Text style={styles.privacyLabel}>
+              {isPublic ? '👁️ Public (View Only)' : '🔒 Private'}
+            </Text>
+            <Text style={styles.privacyDescription}>
+              {isPublic ? 'Others can view this note' : 'Only you can see this note'}
+            </Text>
+          </View>
+          <View style={[styles.toggleSwitch, isPublic && styles.toggleSwitchActive]}>
+            <View style={styles.toggleKnob} />
+          </View>
+        </TouchableOpacity>
+
         {/* Category Selector */}
         <TouchableOpacity 
           style={styles.categorySelector}
@@ -190,10 +208,13 @@ const NoteEditorScreen = ({ route, navigation }) => {
 
         <View style={styles.statusContainer}>
           <Text style={styles.statusText}>
-            {loading ? '💾 Saving...' : '✅ Ready to save'}
+            {loading ? '💾 Saving...' : isPublic ? '👁️ Public Note' : '🔒 Private Note'}
           </Text>
-          <Text style={styles.offlineHint}>
-            Your notes are automatically saved offline
+          <Text style={styles.privacyHint}>
+            {isPublic 
+              ? 'This note can be viewed by others in shared chats'
+              : 'This note is only visible to you'
+            }
           </Text>
         </View>
       </ScrollView>
@@ -242,7 +263,6 @@ const NoteEditorScreen = ({ route, navigation }) => {
   );
 };
 
-// Add these styles to your existing styles
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
@@ -280,61 +300,58 @@ const styles = StyleSheet.create({
     flex: 1, 
     padding: 20,
   },
-  titleInput: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#333',
-    padding: 10,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
+  // Privacy Toggle Styles
+  privacyToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    marginBottom: 16,
+    backgroundColor: '#f8fafc',
   },
-  contentInput: {
+  privacyInfo: {
+    flex: 1,
+  },
+  privacyLabel: {
     fontSize: 16,
-    lineHeight: 24,
-    color: '#333',
-    minHeight: 300,
-    padding: 10,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    textAlignVertical: 'top',
-  },
-  tagsInput: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 20,
-    padding: 10,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-  },
-  statusContainer: {
-    marginTop: 30,
-    padding: 15,
-    backgroundColor: '#f0f9ff',
-    borderRadius: 10,
-    borderLeftWidth: 4,
-    borderLeftColor: '#6366f1',
-  },
-  statusText: {
-    fontSize: 14,
     fontWeight: '600',
-    color: '#6366f1',
-    marginBottom: 5,
+    color: '#334155',
+    marginBottom: 4,
   },
-  offlineHint: {
+  privacyDescription: {
     fontSize: 12,
-    color: '#666',
-    lineHeight: 16,
+    color: '#64748b',
   },
-
+  toggleSwitch: {
+    width: 50,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#cbd5e1',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleSwitchActive: {
+    backgroundColor: '#6366f1',
+  },
+  toggleKnob: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    transform: [{ translateX: 0 }],
+  },
+  // Category Styles
   categorySelector: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 12,
+    padding: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 16,
     backgroundColor: '#f8fafc',
   },
@@ -370,6 +387,54 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontWeight: 'bold',
   },
+  // Input Styles
+  titleInput: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#333',
+    padding: 12,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+  },
+  contentInput: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#333',
+    minHeight: 300,
+    padding: 12,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    textAlignVertical: 'top',
+  },
+  tagsInput: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 20,
+    padding: 12,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+  },
+  statusContainer: {
+    marginTop: 30,
+    padding: 16,
+    backgroundColor: '#f0f9ff',
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#6366f1',
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6366f1',
+    marginBottom: 5,
+  },
+  privacyHint: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+  },
+  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

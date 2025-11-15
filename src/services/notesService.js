@@ -22,13 +22,13 @@ export const notesService = {
       const noteWithMetadata = {
         ...noteData,
         userId,
-        categoryId, // Add category support
+        categoryId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        isPinned: false,
-        isFavorite: false,
+        isPinned: noteData.isPinned || false,
+        isFavorite: noteData.isFavorite || false,
         tags: noteData.tags || [],
-        permission: 'private',
+        permission: noteData.permission || 'private',
         syncStatus: 'synced'
       };
 
@@ -55,7 +55,7 @@ export const notesService = {
 
       // Update category note count if category is specified
       if (categoryId) {
-        await this.updateCategoryNoteCount(categoryId);
+        await this.updateCategoryNoteCount(categoryId, userId);
       }
 
       // Always save to SQLite (both online and offline)
@@ -82,7 +82,7 @@ export const notesService = {
       console.log('✏️ Updating note:', noteId, 'Updates:', updates);
 
       // Get current note to check for category changes
-      const currentNote = await this.getNoteById(noteId, 'all');
+      const currentNote = await this.getNoteById(noteId);
       const oldCategoryId = currentNote?.categoryId;
       const newCategoryId = updates.categoryId;
 
@@ -102,63 +102,23 @@ export const notesService = {
       // Update category counts if category changed
       if (oldCategoryId !== newCategoryId) {
         if (oldCategoryId) {
-          await this.updateCategoryNoteCount(oldCategoryId);
+          await this.updateCategoryNoteCount(oldCategoryId, currentNote.userId);
         }
         if (newCategoryId) {
-          await this.updateCategoryNoteCount(newCategoryId);
+          await this.updateCategoryNoteCount(newCategoryId, currentNote.userId);
         }
       }
 
-      // For SQLite, we need to get the full note data first to ensure we have all fields
-      try {
-        const currentNote = await sqliteService.getNoteById(noteId);
-        if (currentNote) {
-          // Merge updates with existing note data to preserve all fields
-          const mergedNote = {
-            ...currentNote,
-            ...updatedNote, // This overwrites only the updated fields
-            id: noteId // Ensure ID is preserved
-          };
-          await sqliteService.saveNote(mergedNote);
-          console.log('💾 Note updated in local storage with full data:', mergedNote.title);
-        } else {
-          // If note doesn't exist in SQLite, create a minimal version
-          const minimalNote = {
-            id: noteId,
-            title: 'Untitled Note',
-            content: '',
-            tags: [],
-            isPinned: false,
-            isFavorite: false,
-            userId: '', // This should ideally come from somewhere
-            permission: 'private',
-            createdAt: new Date().toISOString(),
-            updatedAt: updatedNote.updatedAt,
-            syncStatus: updatedNote.syncStatus,
-            ...updates
-          };
-          await sqliteService.saveNote(minimalNote);
-          console.log('💾 Note created in local storage (fallback):', minimalNote.title);
-        }
-      } catch (sqliteError) {
-        console.error('❌ Error updating note in SQLite:', sqliteError);
-        // Final fallback - just save what we have
-        const fallbackNote = {
-          id: noteId,
-          title: 'Untitled Note',
-          content: '',
-          tags: [],
-          isPinned: false,
-          isFavorite: false,
-          userId: '',
-          permission: 'private',
-          createdAt: new Date().toISOString(),
-          updatedAt: updatedNote.updatedAt,
-          syncStatus: updatedNote.syncStatus,
-          ...updates
+      // Update SQLite
+      const currentNoteData = await sqliteService.getNoteById(noteId);
+      if (currentNoteData) {
+        const mergedNote = {
+          ...currentNoteData,
+          ...updatedNote,
+          id: noteId
         };
-        await sqliteService.saveNote(fallbackNote);
-        console.log('💾 Note saved with fallback data:', fallbackNote.title);
+        await sqliteService.saveNote(mergedNote);
+        console.log('💾 Note updated in local storage:', mergedNote.title);
       }
       
     } catch (error) {
@@ -172,19 +132,28 @@ export const notesService = {
     try {
       console.log('🗑️ Deleting note:', noteId);
 
+      // Get note first to handle category count
+      const note = await this.getNoteById(noteId);
+      const categoryId = note?.categoryId;
+      const userId = note?.userId;
+
       // Try Firebase first
       try {
         await deleteDoc(doc(firestore, 'notes', noteId));
         console.log('✅ Note deleted from Firebase:', noteId);
       } catch (firebaseError) {
         console.log('🌐 Offline - marking for deletion locally');
-        // Add to sync queue for when we're back online
         await sqliteService.markNoteForSync(noteId, 'DELETE', { id: noteId });
       }
 
       // Always delete from SQLite
       await sqliteService.deleteNote(noteId);
       console.log('🗑️ Note deleted from local storage');
+
+      // Update category count if note had a category
+      if (categoryId && userId) {
+        await this.updateCategoryNoteCount(categoryId, userId);
+      }
       
     } catch (error) {
       console.error('❌ Error deleting note:', error);
@@ -247,7 +216,6 @@ export const notesService = {
       } catch (firebaseError) {
         console.log('🌐 Offline - loading notes from local storage');
         source = 'SQLite';
-        // If Firebase fails, load from SQLite
         notes = await sqliteService.getNotes(userId);
       }
       
@@ -261,7 +229,6 @@ export const notesService = {
       
     } catch (error) {
       console.error('❌ Error fetching notes:', error);
-      // Even if both fail, return empty array instead of throwing
       return [];
     }
   },
@@ -400,9 +367,17 @@ export const notesService = {
     }
   },
 
-  async deleteCategory(categoryId) {
+  async deleteCategory(categoryId, userId) {
     try {
       console.log('🗑️ Deleting category:', categoryId);
+
+      // Remove category from all notes first
+      const allNotes = await this.getUserNotes(userId);
+      const updatePromises = allNotes
+        .filter(note => note.categoryId === categoryId)
+        .map(note => this.updateNote(note.id, { categoryId: null }));
+      
+      await Promise.all(updatePromises);
 
       // Try Firebase first
       try {
@@ -412,15 +387,7 @@ export const notesService = {
         console.log('🌐 Offline - marking category for deletion locally');
       }
 
-      // Remove category from all notes first
-      const allNotes = await this.getUserNotes('all'); // Get all notes to update
-      const updatePromises = allNotes
-        .filter(note => note.categoryId === categoryId)
-        .map(note => this.updateNote(note.id, { categoryId: null }));
-      
-      await Promise.all(updatePromises);
-
-      // Delete category
+      // Delete category from SQLite
       await sqliteService.deleteCategory(categoryId);
       console.log('🗑️ Category deleted from local storage');
       
@@ -429,57 +396,94 @@ export const notesService = {
       throw new Error('Failed to delete category: ' + error.message);
     }
   },
-
-  async getUserCategories(userId) {
+async getUserCategories(userId) {
+  try {
+    let categories = [];
+    let source = 'Firebase';
+    
+    // Try Firebase first
     try {
-      let categories = [];
-      let source = 'Firebase';
+      console.log('🔍 Attempting to load categories from Firebase for user:', userId);
       
-      // Try Firebase first
-      try {
-        const q = query(
-          collection(firestore, 'categories'),
-          where('userId', '==', userId)
-        );
-        
-        const querySnapshot = await getDocs(q);
-        categories = querySnapshot.docs.map(doc => ({
+      const q = query(
+        collection(firestore, 'categories'),
+        where('userId', '==', userId)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      console.log('🔍 Firebase categories query result:', {
+        empty: querySnapshot.empty,
+        size: querySnapshot.size,
+        docs: querySnapshot.docs.length
+      });
+      
+      categories = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('🔍 Processing category doc:', { id: doc.id, data });
+        return {
           id: doc.id,
-          ...doc.data(),
+          ...data,
           syncStatus: 'synced'
-        }));
-        
-        console.log('✅ Categories loaded from Firebase:', categories.length);
-        
-        // Save to SQLite
-        const savePromises = categories.map(category => 
-          sqliteService.saveCategory(category).catch(e => 
-            console.log('⚠️ Failed to save category to SQLite:', category.id)
-          )
-        );
-        await Promise.all(savePromises);
-        
-      } catch (firebaseError) {
-        console.log('🌐 Offline - loading categories from local storage');
-        source = 'SQLite';
-        categories = await sqliteService.getCategories(userId);
-      }
+        };
+      });
       
-      console.log(`📂 Loaded ${categories.length} categories from ${source}`);
-      return categories;
+      console.log('✅ Categories loaded from Firebase:', categories.length);
       
-    } catch (error) {
-      console.error('❌ Error fetching categories:', error);
-      return [];
+      // Save to SQLite
+      const savePromises = categories.map(category => 
+        sqliteService.saveCategory(category).catch(e => 
+          console.log('⚠️ Failed to save category to SQLite:', category.id, e.message)
+        )
+      );
+      await Promise.all(savePromises);
+      
+    } catch (firebaseError) {
+      console.log('🌐 Offline - loading categories from local storage:', firebaseError.message);
+      source = 'SQLite';
+      categories = await sqliteService.getCategories(userId);
     }
-  },
+    
+    // Ensure all categories have proper structure
+    const validatedCategories = categories.map(cat => ({
+      id: cat.id,
+      name: cat.name || 'Unnamed Category',
+      color: cat.color || '#6366f1',
+      userId: cat.userId || userId,
+      createdAt: cat.createdAt || new Date().toISOString(),
+      updatedAt: cat.updatedAt || new Date().toISOString(),
+      noteCount: typeof cat.noteCount === 'number' ? cat.noteCount : 0,
+      syncStatus: cat.syncStatus || 'synced'
+    }));
+    
+    console.log(`📂 Loaded ${validatedCategories.length} categories from ${source}`);
+    return validatedCategories;
+    
+  } catch (error) {
+    console.error('❌ Error fetching categories:', error);
+    return [];
+  }
+},
 
   // Helper method to update category note counts
-  async updateCategoryNoteCount(categoryId) {
+  async updateCategoryNoteCount(categoryId, userId) {
     try {
-      const allNotes = await this.getUserNotes('all');
+      const allNotes = await this.getUserNotes(userId);
       const noteCount = allNotes.filter(note => note.categoryId === categoryId).length;
+      
+      // Update in SQLite
       await sqliteService.updateCategoryNoteCount(categoryId, noteCount);
+      
+      // Update in Firebase if online
+      try {
+        const categoryRef = doc(firestore, 'categories', categoryId);
+        await updateDoc(categoryRef, { 
+          noteCount,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (firebaseError) {
+        console.log('🌐 Offline - category count updated locally only');
+      }
+      
       console.log('📊 Updated category note count:', categoryId, noteCount);
     } catch (error) {
       console.error('❌ Error updating category note count:', error);
@@ -512,9 +516,7 @@ export const notesService = {
           console.log('🔥 Firestore real-time update - notes:', notes.length);
           
           // Only save to SQLite if this is NOT the first snapshot
-          // (first load is already handled by getUserNotes)
           if (!isFirstSnapshot) {
-            // Save all notes to SQLite for offline access
             const savePromises = notes.map(note => 
               sqliteService.saveNote(note).catch(e => 
                 console.log('⚠️ Failed to cache note in SQLite:', note.id)
@@ -539,7 +541,6 @@ export const notesService = {
           console.error('❌ Firestore listener error, falling back to SQLite:', error);
           
           try {
-            // Fallback to SQLite
             const notes = await sqliteService.getNotes(userId);
             const sortedNotes = notes.sort((a, b) => 
               new Date(b.updatedAt) - new Date(a.updatedAt)
@@ -570,7 +571,6 @@ export const notesService = {
           callback([]);
         });
 
-      // Return a dummy unsubscribe function
       return () => console.log('📡 Listener unsubscribed');
     }
   },
@@ -666,13 +666,11 @@ export const notesService = {
           switch (item.operation) {
             case 'CREATE':
               const docRef = await addDoc(collection(firestore, 'notes'), item.data);
-              // Update SQLite with the real Firebase ID
               await sqliteService.saveNote({ 
                 ...item.data, 
                 id: docRef.id, 
                 syncStatus: 'synced' 
               });
-              // Delete the old local note
               await sqliteService.deleteNote(item.recordId);
               break;
               
@@ -691,7 +689,6 @@ export const notesService = {
               break;
           }
           
-          // Remove from sync queue after successful sync
           await sqliteService.removeFromSyncQueue(item.id);
           successfulSyncs++;
           console.log('✅ Successfully synced:', item.operation, item.recordId);
@@ -763,10 +760,30 @@ export const notesService = {
   },
 
   // Get note by ID
-  async getNoteById(noteId, userId) {
+  async getNoteById(noteId) {
     try {
-      const allNotes = await this.getUserNotes(userId);
-      const note = allNotes.find(note => note.id === noteId);
+      // Try SQLite first (faster)
+      let note = await sqliteService.getNoteById(noteId);
+      
+      if (!note) {
+        // Fallback to Firebase
+        try {
+          const noteRef = doc(firestore, 'notes', noteId);
+          const noteSnap = await getDoc(noteRef);
+          if (noteSnap.exists()) {
+            note = {
+              id: noteSnap.id,
+              ...noteSnap.data(),
+              syncStatus: 'synced'
+            };
+            // Save to SQLite for future access
+            await sqliteService.saveNote(note);
+          }
+        } catch (firebaseError) {
+          console.log('🌐 Could not fetch note from Firebase');
+        }
+      }
+      
       if (note) {
         console.log('📄 Found note by ID:', noteId);
       } else {
@@ -777,5 +794,82 @@ export const notesService = {
       console.error('❌ Error getting note by ID:', error);
       return null;
     }
+  },
+  // Add this method to your notesService.js to debug Firebase categories
+async debugFirebaseCategories(userId) {
+  try {
+    console.log('🔍 DEBUG: Checking Firebase categories for user:', userId);
+    
+    const q = query(
+      collection(firestore, 'categories'),
+      where('userId', '==', userId)
+    );
+    
+    const querySnapshot = await getDocs(q);
+    console.log('🔍 DEBUG: Firebase categories snapshot:', {
+      exists: !querySnapshot.empty,
+      size: querySnapshot.size,
+      docs: querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        data: doc.data()
+      }))
+    });
+    
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('🔍 DEBUG: Error checking Firebase categories:', error);
+    return [];
   }
+},
+// Add this method to initialize default categories
+async initializeDefaultCategories(userId) {
+  try {
+    console.log('🏗️ Initializing default categories for user:', userId);
+    
+    const defaultCategories = [
+      {
+        name: 'Personal',
+        color: '#6366f1',
+        noteCount: 0
+      },
+      {
+        name: 'Work',
+        color: '#10b981',
+        noteCount: 0
+      },
+      {
+        name: 'Study',
+        color: '#f59e0b',
+        noteCount: 0
+      },
+      {
+        name: 'Ideas',
+        color: '#8b5cf6',
+        noteCount: 0
+      }
+    ];
+    
+    const createdCategories = [];
+    
+    for (const categoryData of defaultCategories) {
+      try {
+        const category = await this.createCategory(categoryData, userId);
+        createdCategories.push(category);
+        console.log('✅ Created default category:', categoryData.name);
+      } catch (error) {
+        console.log('⚠️ Could not create default category:', categoryData.name, error.message);
+      }
+    }
+    
+    console.log(`🏗️ Created ${createdCategories.length} default categories`);
+    return createdCategories;
+    
+  } catch (error) {
+    console.error('❌ Error initializing default categories:', error);
+    return [];
+  }
+}
 };

@@ -803,4 +803,4 @@ export default {
   updateCategoryNoteCount,
   isInitialized: () => true,
   isRealSQLite: () => isRealSQLite
-};
+}; 

@@ -8,16 +8,21 @@ import {
   ScrollView, 
   ActivityIndicator,
   Alert,
-  RefreshControl
+  RefreshControl,
+  Modal
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useAuth } from '../context/AuthContext';
 import { useNotes } from '../context/NotesContext';
+import ShareModal from '../components/ShareModal';
 
 const HomeScreen = ({ navigation }) => {
   const { user, logout } = useAuth();
-  const { notes, pinnedNotes, favorites, categories, uncategorizedNotes, loading, syncPendingChanges } = useNotes();
+  const { notes, pinnedNotes, favorites, categories, uncategorizedNotes, loading, syncPendingChanges, isOnline } = useNotes();
   const [refreshing, setRefreshing] = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [selectedNote, setSelectedNote] = useState(null);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
 
   // Get recent notes (last 3 notes)
   const recentNotes = notes
@@ -45,6 +50,7 @@ const HomeScreen = ({ navigation }) => {
             onPress: async () => {
               try {
                 await logout();
+                setProfileModalVisible(false);
               } catch (error) {
                 console.error('Logout error:', error);
                 Alert.alert('Error', 'Failed to logout. Please try again.');
@@ -99,12 +105,46 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const handleProfilePress = () => {
+    setProfileModalVisible(true);
+  };
+
+  const handleProfileNavigation = () => {
+    setProfileModalVisible(false);
     try {
       navigation.navigate('Profile');
     } catch (error) {
       console.error('Navigation error:', error);
       Alert.alert('Error', 'Cannot open profile at this time');
     }
+  };
+
+  // Share note function - only for public notes
+  const handleShareNote = async (note) => {
+    if (!isOnline) {
+      Alert.alert(
+        'Offline Mode',
+        'Sharing is only available when you\'re online. Please check your internet connection.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    if (note.permission !== 'view_only') {
+      Alert.alert(
+        'Private Note',
+        'Only public notes (View Only) can be shared. Change the note permission to "Public" to share it.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setSelectedNote(note);
+    setShareModalVisible(true);
+  };
+
+  const closeShareModal = () => {
+    setShareModalVisible(false);
+    setSelectedNote(null);
   };
 
   const StatCard = ({ title, value, color, filterType, categoryId = null }) => (
@@ -127,8 +167,29 @@ const HomeScreen = ({ navigation }) => {
           {note.title || 'Untitled Note'}
         </Text>
         <View style={styles.noteIndicators}>
-          {note.isPinned && <Text style={styles.pinIndicator}>📌</Text>}
-          {note.isFavorite && <Text style={styles.favIndicator}>⭐</Text>}
+          {note.isPinned && (
+            <View style={styles.indicator}>
+              <Text style={styles.indicatorIcon}>📌</Text>
+            </View>
+          )}
+          {note.isFavorite && (
+            <View style={styles.indicator}>
+              <Text style={styles.indicatorIcon}>⭐</Text>
+            </View>
+          )}
+          {note.permission === 'view_only' && (
+            <View style={styles.indicator}>
+              <Text style={styles.indicatorIcon}>👁️</Text>
+            </View>
+          )}
+          {note.permission === 'view_only' && (
+            <TouchableOpacity 
+              style={styles.shareButton}
+              onPress={() => handleShareNote(note)}
+            >
+              <Text style={styles.shareIcon}>📤</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
       <Text style={styles.notePreviewContent} numberOfLines={2}>
@@ -151,6 +212,11 @@ const HomeScreen = ({ navigation }) => {
           {new Date(note.updatedAt).toLocaleDateString()}
         </Text>
       </View>
+      {note.permission === 'view_only' && (
+        <View style={styles.publicBadge}>
+          <Text style={styles.publicBadgeText}>👁️ Public</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 
@@ -199,7 +265,6 @@ const HomeScreen = ({ navigation }) => {
               transition={300}
               onError={(e) => {
                 console.log('❌ Failed to load profile picture, using placeholder');
-                // The image component will handle the error gracefully
               }}
             />
           ) : (
@@ -212,22 +277,26 @@ const HomeScreen = ({ navigation }) => {
           <View style={styles.welcomeContainer}>
             <Text style={styles.welcome}>Welcome back,</Text>
             <Text style={styles.userName}>{user?.name || user?.email}!</Text>
-            <Text style={styles.noteCount}>
-              {notes.length} note{notes.length !== 1 ? 's' : ''} • {categories.length} categor{categories.length !== 1 ? 'ies' : 'y'}
-            </Text>
+            <View style={styles.statusContainer}>
+              <Text style={styles.noteCount}>
+                {notes.length} note{notes.length !== 1 ? 's' : ''} • {categories.length} categor{categories.length !== 1 ? 'ies' : 'y'}
+              </Text>
+              <View style={[styles.onlineStatus, isOnline ? styles.online : styles.offline]}>
+                <Text style={styles.onlineStatusText}>
+                  {isOnline ? '🌐 Online' : '📴 Offline'}
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity 
-            style={styles.profileButton}
-            onPress={handleProfilePress}
-          >
-            <Text style={styles.profileButtonText}>👤</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
-        </View>
+        
+        {/* Profile Dropdown Button */}
+        <TouchableOpacity 
+          style={styles.profileDropdownButton}
+          onPress={handleProfilePress}
+        >
+          <Text style={styles.dropdownIcon}>⋮</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView 
@@ -313,7 +382,7 @@ const HomeScreen = ({ navigation }) => {
             </View>
             <View style={styles.recentNotesContainer}>
               {recentNotes.map((note, index) => (
-                <NotePreview key={note.id || index} note={note} />
+                <NotePreview key={`${note.id}_${index}`} note={note} />
               ))}
             </View>
           </View>
@@ -330,7 +399,7 @@ const HomeScreen = ({ navigation }) => {
             </View>
             <View style={styles.categoriesContainer}>
               {topCategories.map((category, index) => (
-                <CategoryPreview key={category.id || index} category={category} />
+                <CategoryPreview key={`${category.id}_${index}`} category={category} />
               ))}
             </View>
           </View>
@@ -350,7 +419,7 @@ const HomeScreen = ({ navigation }) => {
               <View style={styles.chatContent}>
                 <Text style={styles.chatTitle}>Public Chat</Text>
                 <Text style={styles.chatDescription}>
-                  Chat with everyone in the community
+                  Share and discuss public notes with everyone
                 </Text>
               </View>
               <Text style={styles.arrow}>→</Text>
@@ -390,6 +459,46 @@ const HomeScreen = ({ navigation }) => {
           </View>
         )}
       </ScrollView>
+
+      {/* Profile Dropdown Modal */}
+      <Modal
+        visible={profileModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setProfileModalVisible(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setProfileModalVisible(false)}
+        >
+          <View style={styles.profileDropdown}>
+            <TouchableOpacity 
+              style={styles.dropdownItem}
+              onPress={handleProfileNavigation}
+            >
+              <Text style={styles.dropdownIcon}>👤</Text>
+              <Text style={styles.dropdownText}>Profile</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.dropdownItem}
+              onPress={handleLogout}
+            >
+              <Text style={styles.dropdownIcon}>🚪</Text>
+              <Text style={styles.dropdownText}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Share Modal */}
+      <ShareModal
+        visible={shareModalVisible}
+        onClose={closeShareModal}
+        note={selectedNote}
+          navigation={navigation} 
+      />
     </View>
   );
 };
@@ -456,35 +565,41 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
   },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
   noteCount: {
     fontSize: 12,
     color: 'rgba(255,255,255,0.7)',
-    marginTop: 2,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  onlineStatus: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  profileButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 20,
+  online: {
+    backgroundColor: 'rgba(34, 197, 94, 0.3)',
   },
-  profileButtonText: {
-    color: '#fff',
-    fontSize: 16,
+  offline: {
+    backgroundColor: 'rgba(239, 68, 68, 0.3)',
   },
-  logoutButton: {
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 20,
-  },
-  logoutText: {
+  onlineStatusText: {
+    fontSize: 10,
     color: '#fff',
     fontWeight: '600',
+  },
+  profileDropdownButton: {
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+  },
+  dropdownIcon: {
+    fontSize: 20,
+    color: '#fff',
+    fontWeight: 'bold',
   },
   content: {
     flex: 1,
@@ -597,13 +712,21 @@ const styles = StyleSheet.create({
   },
   noteIndicators: {
     flexDirection: 'row',
-    gap: 4,
+    gap: 6,
+    alignItems: 'center',
   },
-  pinIndicator: {
-    fontSize: 12,
+  indicator: {
+    padding: 2,
   },
-  favIndicator: {
-    fontSize: 12,
+  indicatorIcon: {
+    fontSize: 14,
+  },
+  shareButton: {
+    padding: 4,
+  },
+  shareIcon: {
+    fontSize: 14,
+    opacity: 0.7,
   },
   notePreviewContent: {
     fontSize: 14,
@@ -639,6 +762,20 @@ const styles = StyleSheet.create({
   notePreviewDate: {
     fontSize: 12,
     color: '#94a3b8',
+  },
+  publicBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#dbeafe',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  publicBadgeText: {
+    fontSize: 10,
+    color: '#1e40af',
+    fontWeight: '600',
   },
   categoriesSection: {
     marginBottom: 30,
@@ -767,6 +904,38 @@ const styles = StyleSheet.create({
     fontWeight: '600', 
     fontSize: 14,
   },
+  // Profile Dropdown Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 100,
+    paddingRight: 20,
+  },
+  profileDropdown: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+    minWidth: 150,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+  },
+  dropdownText: {
+    fontSize: 16,
+    color: '#334155',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
 });
 
-export default HomeScreen; 
+export default HomeScreen;

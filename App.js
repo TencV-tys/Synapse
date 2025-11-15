@@ -16,10 +16,11 @@ import ChatScreen from './src/screens/ChatScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import DirectMessagesScreen from './src/screens/DirectMessagesScreen'; // Add this import
 import CategoriesScreen from './src/screens/CategoriesScreen';
+import DebugScreen from './src/screens/DebugScreen';
 
 const Stack = createStackNavigator();
 
-// Loading Screen Component
+// Loading Screen Component 
 const LoadingScreen = () => (
   <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
     <ActivityIndicator size="large" color="#6366f1" />
@@ -100,6 +101,7 @@ const AppStack = () => (
     headerBackTitle: 'Back'
   }} 
 />
+<Stack.Screen name="Debug" component={DebugScreen} />
   </Stack.Navigator>
 );
 
