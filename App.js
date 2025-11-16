@@ -18,6 +18,7 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import DirectMessagesScreen from './src/screens/DirectMessagesScreen';
 import CategoriesScreen from './src/screens/CategoriesScreen';
 import DebugScreen from './src/screens/DebugScreen';
+import InAppShareScreen from './src/screens/InAppShareScreen';
 
 const Stack = createStackNavigator();
 
@@ -75,24 +76,21 @@ const AppStack = () => (
       name="Chat" 
       component={ChatScreen} 
       options={{ 
-        title: 'Chat',
-        headerBackTitle: 'Back'
+        headerShown: false // Hide header for ChatScreen (has custom header)
       }} 
     />
     <Stack.Screen 
       name="DirectMessages" 
       component={DirectMessagesScreen} 
       options={{ 
-        title: 'Direct Messages',
-        headerBackTitle: 'Back'
+       headerBackTitle: 'Back'
       }} 
-    />
+    /> 
     <Stack.Screen 
       name="Profile" 
       component={ProfileScreen} 
       options={{ 
-        title: 'Profile',
-        headerBackTitle: 'Back'
+        headerShown: false // Hide header for ProfileScreen (has custom header)
       }} 
     />
     <Stack.Screen 
@@ -100,10 +98,25 @@ const AppStack = () => (
       component={CategoriesScreen} 
       options={{ 
         title: 'Categories',
+          headerBackTitle: 'Back'
+      }} 
+    />
+    <Stack.Screen 
+      name="Debug" 
+      component={DebugScreen} 
+      options={{ 
+        title: 'Debug',
         headerBackTitle: 'Back'
       }} 
     />
-    <Stack.Screen name="Debug" component={DebugScreen} />
+    <Stack.Screen 
+      name="InAppShare" 
+      component={InAppShareScreen}
+      options={{ 
+        title: 'Share Note',
+        headerBackTitle: 'Back'
+      }}
+    />
   </Stack.Navigator>
 );
 
@@ -137,5 +150,5 @@ export default function App() {
         </NavigationContainer>
       </NotesProvider>
     </AuthProvider>
-  );
+  ); 
 }

@@ -196,8 +196,10 @@ const CategoriesScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Categories</Text>
+      {/* Header with back button on the right */}
+
+      {/* Add Category Button */}
+      <View style={styles.addButtonContainer}>
         <TouchableOpacity 
           style={styles.addButton}
           onPress={() => setModalVisible(true)}
@@ -344,27 +346,46 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    
     paddingTop: 60,
     backgroundColor: '#6366f1',
   },
   headerTitle: {
     fontSize: 20,
+    marginLeft:20,
     fontWeight: 'bold',
     color: '#fff',
   },
+  backButton: {
+    padding: 8,
+  }, 
+  backButtonText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  addButtonContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 15,
+    paddingBottom: 10,
+  },
   addButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   addButtonText: {
     color: '#fff',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 16,
   },
   statsContainer: {
     backgroundColor: '#fff',

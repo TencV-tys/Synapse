@@ -545,12 +545,6 @@ const DirectMessagesScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>💬 Direct Messages</Text>
-        <TouchableOpacity onPress={onRefresh} disabled={refreshing}>
-          <Text style={styles.refreshButton}>🔄</Text>
-        </TouchableOpacity>
-      </View>
 
       {!hasData && !loading && (
         <View style={styles.emptyState}>

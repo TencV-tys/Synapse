@@ -18,9 +18,10 @@ import {
   Share
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { database } from '../config/firebase';
-import { ref, push, onValue, off, set, serverTimestamp } from 'firebase/database';
-
+import { database, firestore } from '../config/firebase';
+import { ref, push, onValue, off, set, serverTimestamp, get } from 'firebase/database';
+import { doc, getDoc } from 'firebase/firestore';
+import { copyToClipboard } from '../utils/clipboard';
 const ChatScreen = ({ route, navigation }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
@@ -35,7 +36,7 @@ const ChatScreen = ({ route, navigation }) => {
   const { directMessage, targetUser } = route.params || {};
   
   const [activeChat, setActiveChat] = useState(
-    directMessage ? targetUser?.id : 'public'
+    directMessage ? targetUser?.uid || targetUser?.id : 'public'
   );
   const [activeChatName, setActiveChatName] = useState(
     directMessage ? targetUser?.name : 'Public Chat'
@@ -51,6 +52,133 @@ const ChatScreen = ({ route, navigation }) => {
   const [editText, setEditText] = useState('');
   
   const flatListRef = useRef(null);
+
+  // ✅ Function to get complete user data from Firestore (same as DirectMessagesScreen)
+  const getCompleteUserData = async (userId, realtimeData) => {
+    try {
+      console.log(`🔍 Fetching complete data from Firestore for: ${userId}`);
+      
+      const userDoc = await getDoc(doc(firestore, 'users', userId));
+      
+      if (userDoc.exists()) {
+        const firestoreData = userDoc.data();
+        console.log(`✅ Found complete user data in Firestore: ${firestoreData.name || userId}`);
+        
+        // Merge Realtime data with Firestore data
+        return {
+          id: userId,
+          uid: userId,
+          name: firestoreData.name || firestoreData.displayName || 
+                (firestoreData.email ? firestoreData.email.split('@')[0] : 'User'),
+          email: firestoreData.email || 'No email',
+          profilePic: firestoreData.profilePic || firestoreData.photoURL || null,
+          userType: firestoreData.userType || 'student',
+          lastActive: realtimeData?.lastActive || firestoreData.lastActive,
+          isOnline: realtimeData?.isOnline !== undefined ? realtimeData.isOnline : true,
+          createdAt: firestoreData.createdAt,
+          ...realtimeData,
+          ...firestoreData
+        };
+      } else {
+        console.log(`❌ User ${userId} not found in Firestore, using Realtime data`);
+        return {
+          id: userId,
+          uid: userId,
+          name: realtimeData?.name || realtimeData?.displayName || 
+                (realtimeData?.email ? realtimeData.email.split('@')[0] : 'User'),
+          email: realtimeData?.email || 'No email',
+          profilePic: realtimeData?.profilePic || realtimeData?.photoURL || null,
+          userType: realtimeData?.userType || 'student',
+          lastActive: realtimeData?.lastActive,
+          isOnline: realtimeData?.isOnline,
+          createdAt: realtimeData?.createdAt,
+          ...realtimeData
+        };
+      }
+    } catch (error) {
+      console.error(`❌ Error fetching Firestore data for ${userId}:`, error);
+      return {
+        id: userId,
+        uid: userId,
+        name: realtimeData?.name || realtimeData?.displayName || 
+              (realtimeData?.email ? realtimeData.email.split('@')[0] : 'User'),
+        email: realtimeData?.email || 'No email',
+        profilePic: realtimeData?.profilePic || realtimeData?.photoURL || null,
+        userType: realtimeData?.userType || 'student',
+        lastActive: realtimeData?.lastActive,
+        isOnline: realtimeData?.isOnline,
+        createdAt: realtimeData?.createdAt,
+        ...realtimeData
+      };
+    }
+  };
+
+  // ✅ Enhanced users loading with combined data
+  const loadUsers = () => {
+    return new Promise((resolve) => {
+      const usersRef = ref(database, 'users');
+      console.log('🔍 Setting up users listener for ChatScreen...');
+      
+      const usersUnsubscribe = onValue(usersRef, async (snapshot) => {
+        try {
+          const data = snapshot.val();
+          console.log('📊 ChatScreen - Users data received from Realtime DB');
+          
+          if (data) {
+            const usersPromises = Object.entries(data)
+              .filter(([id]) => id !== user?.uid)
+              .map(async ([id, userData]) => {
+                // ✅ CHECK if user data is incomplete
+                const isIncomplete = !userData.name || !userData.email || !userData.userType;
+                
+                if (isIncomplete) {
+                  console.log(`🔄 ChatScreen - User ${id} has incomplete data, fetching from Firestore...`);
+                  return await getCompleteUserData(id, userData);
+                } else {
+                  console.log(`✅ ChatScreen - User ${id} has complete data in Realtime DB`);
+                  return {
+                    id,
+                    uid: id,
+                    name: userData.name || userData.displayName || 
+                          (userData.email ? userData.email.split('@')[0] : 'User'),
+                    email: userData.email || 'No email',
+                    profilePic: userData.profilePic || userData.photoURL || null,
+                    userType: userData.userType || 'student',
+                    lastActive: userData.lastActive,
+                    isOnline: userData.isOnline,
+                    createdAt: userData.createdAt,
+                    ...userData
+                  };
+                }
+              });
+
+            const usersArray = await Promise.all(usersPromises);
+            
+            console.log(`👥 ChatScreen - Processed ${usersArray.length} users (excluding current user)`);
+            
+            // Filter for online users only (last 5 minutes)
+            const onlineUsers = usersArray.filter(u => 
+              u.lastActive && (Date.now() - new Date(u.lastActive).getTime()) < 300000
+            );
+            
+            setUsers(onlineUsers);
+          } else {
+            console.log('❌ ChatScreen - No users found in database');
+            setUsers([]);
+          }
+        } catch (error) {
+          console.error('❌ ChatScreen - Error loading users:', error);
+        } finally {
+          resolve();
+        }
+      }, (error) => {
+        console.error('❌ ChatScreen - Firebase users listener error:', error);
+        resolve();
+      });
+
+      return usersUnsubscribe;
+    });
+  };
 
   // Keyboard handling
   useEffect(() => {
@@ -76,11 +204,11 @@ const ChatScreen = ({ route, navigation }) => {
 
   // References
   const publicChatRef = ref(database, 'chats/public');
-  const usersRef = ref(database, 'users');
 
   useEffect(() => {
     console.log('💬 ChatScreen mounted - Setting up listeners');
     console.log('📱 Chat mode:', directMessage ? `Direct with ${targetUser?.name}` : 'Public');
+    console.log('👤 Current user:', user?.email);
     
     if (!database) {
       console.error('❌ Database not initialized');
@@ -105,8 +233,10 @@ const ChatScreen = ({ route, navigation }) => {
             return timeA - timeB;
           });
           
+          console.log(`💬 Loaded ${messagesArray.length} messages for ${activeChatName}`);
           setMessages(messagesArray);
         } else {
+          console.log(`💬 No messages found for ${activeChatName}`);
           setMessages([]);
         }
       } catch (error) {
@@ -123,27 +253,11 @@ const ChatScreen = ({ route, navigation }) => {
 
     // Only load online users if in public chat mode
     if (!directMessage) {
-      const usersUnsubscribe = onValue(usersRef, (snapshot) => {
-        try {
-          const data = snapshot.val();
-          if (data) {
-            const usersArray = Object.entries(data)
-              .map(([id, userData]) => ({
-                id,
-                ...userData
-              }))
-              .filter(u => u.id !== user?.uid) // Exclude current user
-              .filter(u => u.lastActive && (Date.now() - new Date(u.lastActive).getTime()) < 300000); // Online in last 5 minutes
-            
-            setUsers(usersArray);
-          }
-        } catch (error) {
-          console.error('❌ Error loading users:', error);
-        }
-      });
+      const usersUnsubscribe = loadUsers();
 
       return () => {
-        off(usersRef, 'value', usersUnsubscribe);
+        console.log('🧹 Cleaning up ChatScreen listeners');
+        off(ref(database, 'users'), 'value', usersUnsubscribe);
         off(getActiveChatRef(), 'value', chatUnsubscribe);
       };
     }
@@ -183,13 +297,21 @@ const ChatScreen = ({ route, navigation }) => {
       const chatRef = getActiveChatRef();
       const newMessageRef = push(chatRef);
       
+      // ✅ Get complete user data for message
+      const completeUserData = await getCompleteUserData(user.uid, {
+        name: user.name,
+        email: user.email,
+        profilePic: user.profilePic,
+        userType: user.userType
+      });
+
       const messageData = {
         text: messageText,
         userId: user.uid,
-        userName: user.name || user.displayName || user.email.split('@')[0],
-        userEmail: user.email,
-        userProfilePic: user.profilePic || null,
-        userType: user.userType || 'student',
+        userName: completeUserData.name,
+        userEmail: completeUserData.email,
+        userProfilePic: completeUserData.profilePic,
+        userType: completeUserData.userType,
         timestamp: serverTimestamp(),
         chatType: activeChat === 'public' ? 'public' : 'private',
         recipientId: activeChat !== 'public' ? activeChat : null
@@ -254,36 +376,18 @@ const ChatScreen = ({ route, navigation }) => {
     setSelectedMessage(null);
   };
 
-  const handleCopyText = async () => {
-    if (!selectedMessage) return;
-    
-    try {
-      Alert.alert(
-        'Copy Text',
-        selectedMessage.text,
-        [
-          {
-            text: 'OK',
-            style: 'default'
-          },
-          {
-            text: 'Select All',
-            onPress: () => {
-              console.log('📋 Text ready for manual copy:', selectedMessage.text);
-            }
-          }
-        ],
-        { cancelable: true }
-      );
-      
-      console.log('📋 Text to copy manually:', selectedMessage.text);
-      
-    } catch (error) {
-      console.error('❌ Copy error:', error);
-      Alert.alert('Message Text', selectedMessage.text);
-    }
-  };
-
+const handleCopyText = async () => {
+  if (!selectedMessage) return;
+  
+  try {
+    await copyToClipboard(selectedMessage.text);
+  } catch (error) {
+    console.error('❌ Copy failed:', error);
+    // Ultimate fallback
+    Alert.alert('Message Text', selectedMessage.text);
+  }
+};
+ 
   const handleEditMessage = () => {
     if (!selectedMessage) return;
     
@@ -337,12 +441,11 @@ const ChatScreen = ({ route, navigation }) => {
     if (!selectedMessage) return;
     
     try {
-      const chatRef = getActiveChatRef();
-      const messageRef = ref(database, `chats/${activeChat === 'public' ? 'public' : `private/${[user.uid, activeChat].sort().join('_')}`}/${selectedMessage.id}`);
-      
+      const messageRef = ref(database, `${getActiveChatRef().key}/${selectedMessage.id}`);
       await set(messageRef, null);
       Alert.alert('Success', 'Message deleted');
     } catch (error) {
+      console.error('❌ Error deleting message:', error);
       Alert.alert('Error', 'Failed to delete message');
     }
   };
@@ -351,8 +454,7 @@ const ChatScreen = ({ route, navigation }) => {
     if (!editingMessage || !editText.trim()) return;
     
     try {
-      const chatRef = getActiveChatRef();
-      const messageRef = ref(database, `chats/${activeChat === 'public' ? 'public' : `private/${[user.uid, activeChat].sort().join('_')}`}/${editingMessage.id}`);
+      const messageRef = ref(database, `${getActiveChatRef().key}/${editingMessage.id}`);
       
       await set(messageRef, {
         ...editingMessage,
@@ -365,6 +467,7 @@ const ChatScreen = ({ route, navigation }) => {
       setEditText('');
       Alert.alert('Success', 'Message updated');
     } catch (error) {
+      console.error('❌ Error updating message:', error);
       Alert.alert('Error', 'Failed to update message');
     }
   };
@@ -377,35 +480,27 @@ const ChatScreen = ({ route, navigation }) => {
 
   const showProfile = async (messageUserData) => {
     try {
-      console.log('👤 Showing profile for:', messageUserData);
+      console.log('👤 ChatScreen - Showing profile for:', messageUserData);
       
+      // Try to find user in current users list first
       let completeUserData = users.find(u => u.id === messageUserData.userId);
       
       if (!completeUserData) {
-        console.log('🔍 User not in current list, fetching from Firebase...');
-        const userRef = ref(database, `users/${messageUserData.userId}`);
-        
-        onValue(userRef, (snapshot) => {
-          const userData = snapshot.val();
-          if (userData) {
-            setSelectedUser({
-              id: messageUserData.userId,
-              name: userData.name || messageUserData.userName,
-              email: userData.email || messageUserData.userEmail,
-              userType: userData.userType || messageUserData.userType || 'student',
-              profilePic: userData.profilePic || messageUserData.userProfilePic,
-              lastActive: userData.lastActive,
-              isOnline: userData.isOnline
-            });
-            setShowUserProfile(true);
-          }
-        }, { onlyOnce: true });
-      } else {
-        setSelectedUser(completeUserData);
-        setShowUserProfile(true);
+        console.log('🔍 User not in current list, fetching complete data...');
+        completeUserData = await getCompleteUserData(messageUserData.userId, {
+          name: messageUserData.userName,
+          email: messageUserData.userEmail,
+          profilePic: messageUserData.userProfilePic,
+          userType: messageUserData.userType
+        });
       }
+      
+      setSelectedUser(completeUserData);
+      setShowUserProfile(true);
+      
     } catch (error) {
       console.error('❌ Error loading user profile:', error);
+      // Fallback to message data
       setSelectedUser({
         id: messageUserData.userId,
         name: messageUserData.userName,
@@ -460,6 +555,25 @@ const ChatScreen = ({ route, navigation }) => {
   const getUserEmail = (userData) => {
     if (!userData) return 'No email';
     return userData.email || userData.userEmail || 'No email available';
+  };
+
+  const isUserOnline = (userData) => {
+    return userData.isOnline || 
+      (userData.lastActive && (Date.now() - new Date(userData.lastActive).getTime()) < 300000);
+  };
+
+  const formatLastSeen = (lastActive) => {
+    if (!lastActive) return 'Never';
+    
+    const diff = Date.now() - new Date(lastActive).getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
   };
 
   // ✅ FIXED: Profile picture shows for BOTH users in messages with TIMESTAMP AT BOTTOM
@@ -587,19 +701,28 @@ const ChatScreen = ({ route, navigation }) => {
       }}
       activeOpacity={0.7}
     >
-      {item.profilePic ? (
-        <Image 
-          source={{ uri: item.profilePic }} 
-          style={styles.userAvatar}
-          onError={(error) => console.log('❌ Failed to load user profile picture')}
+      <View style={styles.avatarContainer}>
+        {item.profilePic ? (
+          <Image 
+            source={{ uri: item.profilePic }} 
+            style={styles.userAvatar}
+            onError={(error) => console.log('❌ Failed to load user profile picture')}
+          />
+        ) : (
+          <View style={[styles.userAvatar, styles.avatarPlaceholder]}>
+            <Text style={styles.avatarText}>
+              {getUserDisplayName(item).charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
+        <View 
+          style={[
+            styles.onlineIndicator,
+            isUserOnline(item) ? styles.online : styles.offline
+          ]} 
         />
-      ) : (
-        <View style={[styles.userAvatar, styles.avatarPlaceholder]}>
-          <Text style={styles.avatarText}>
-            {getUserDisplayName(item).charAt(0).toUpperCase()}
-          </Text>
-        </View>
-      )}
+      </View>
+      
       <View style={styles.userInfo}>
         <Text style={styles.userName}>{getUserDisplayName(item)}</Text>
         <View style={styles.userDetails}>
@@ -613,8 +736,9 @@ const ChatScreen = ({ route, navigation }) => {
               {getRoleLabel(item.userType)}
             </Text>
           </View>
-          <View style={styles.onlineIndicator} />
-          <Text style={styles.onlineText}>Online</Text>
+          <Text style={styles.onlineText}>
+            {isUserOnline(item) ? 'Online' : formatLastSeen(item.lastActive)}
+          </Text>
         </View>
       </View>
       <Text style={styles.chatIcon}>💬</Text>
@@ -832,22 +956,24 @@ const ChatScreen = ({ route, navigation }) => {
                 <View style={styles.profileStatus}>
                   <View style={[
                     styles.statusIndicator, 
-                    selectedUser.isOnline ? styles.statusOnline : styles.statusOffline
+                    isUserOnline(selectedUser) ? styles.statusOnline : styles.statusOffline
                   ]} />
                   <Text style={styles.profileStatusText}>
-                    {selectedUser.isOnline ? 'Online' : 'Offline'}
+                    {isUserOnline(selectedUser) ? 'Online' : `Last seen ${formatLastSeen(selectedUser.lastActive)}`}
                   </Text>
                 </View>
 
-                <TouchableOpacity 
-                  style={styles.messageUserButton}
-                  onPress={() => {
-                    startDirectMessage(selectedUser);
-                    setShowUserProfile(false);
-                  }}
-                >
-                  <Text style={styles.messageUserButtonText}>💬 Send Message</Text>
-                </TouchableOpacity>
+                {!directMessage && (
+                  <TouchableOpacity 
+                    style={styles.messageUserButton}
+                    onPress={() => {
+                      startDirectMessage(selectedUser);
+                      setShowUserProfile(false);
+                    }}
+                  >
+                    <Text style={styles.messageUserButtonText}>💬 Send Message</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
@@ -951,6 +1077,9 @@ const ChatScreen = ({ route, navigation }) => {
     </View>
   );
 };
+
+// ... (Keep all the same styles from your original ChatScreen)
+// The styles remain exactly the same as in your original ChatScreen
 
 const styles = StyleSheet.create({
   container: {
@@ -1058,16 +1187,13 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   avatarContainer: {
+    position: 'relative',
     marginRight: 8,
   },
   messageAvatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
-  },
-  avatarSpacer: {
-    width: 36,
-    marginLeft: 8,
   },
   avatarPlaceholder: {
     backgroundColor: '#6366f1',
@@ -1078,6 +1204,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  online: {
+    backgroundColor: '#10b981',
+  },
+  offline: {
+    backgroundColor: '#94a3b8',
   },
   messageContent: {
     flex: 1,
@@ -1320,17 +1462,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  onlineIndicator: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#10b981',
-    marginLeft: 8,
-    marginRight: 4,
-  },
   onlineText: {
     fontSize: 11,
-    color: '#10b981',
+    color: '#64748b',
+    marginLeft: 8,
   },
   chatIcon: {
     fontSize: 16,
@@ -1505,7 +1640,7 @@ const styles = StyleSheet.create({
     color: '#6366f1',
     textAlign: 'center',
     fontWeight: '600',
-  },
-});
-
-export default ChatScreen;  
+  }, 
+}); 
+ 
+export default ChatScreen;
