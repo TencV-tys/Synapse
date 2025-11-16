@@ -6,14 +6,14 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { ref, set, get } from 'firebase/database'; // ✅ ADD 'get' IMPORT
+import { ref, set, get } from 'firebase/database';
 import { storage } from '../config/firebase';
-import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'; // ✅ ADD deleteObject
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { auth, firestore, database } from '../config/firebase';
 import sqliteService from './sqliteService';
 
 export const authService = {
-  // Online login - UPDATED WITH PROFILE SYNC CHECK
+  // Online login - UPDATED WITH COMPLETE REALTIME DB SAVE
   async login(email, password) {
     try {
       console.log('🔐 Online login for:', email);
@@ -40,42 +40,47 @@ export const authService = {
         };
       }
 
-      // Update last login
-      userData.lastLogin = new Date().toISOString();
-      userData.isOnline = true;
-      userData.isOffline = false;
+      // Update last login and ensure all fields
+      const completeUserData = {
+        ...userData,
+        lastLogin: new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        isOnline: true,
+        isOffline: false,
+        updatedAt: new Date().toISOString()
+      };
+
+      console.log('🔑 User data with password:', completeUserData.password ? 'SET' : 'MISSING');
       
-      console.log('🔑 User data with password:', userData.password ? 'SET' : 'MISSING');
-      
-      // ✅ CRITICAL: Save to Realtime Database for chat features
-      await this.saveUserToRealtimeDB(userData);
+      // ✅ CRITICAL: Save COMPLETE user to Realtime Database
+      await this.saveUserToRealtimeDB(completeUserData);
       
       // Try to update Firestore, but don't let it fail the login
       try {
-        await setDoc(doc(firestore, 'users', firebaseUser.uid), userData, { merge: true });
+        await setDoc(doc(firestore, 'users', firebaseUser.uid), completeUserData, { merge: true });
         console.log('✅ User data saved to Firestore');
       } catch (firestoreError) {
         console.log('⚠️ Firestore save failed, but continuing:', firestoreError.message);
       }
       
       // ✅ CRITICAL: ALWAYS save to SQLite with password
-      await sqliteService.saveUser(userData);
+      await sqliteService.saveUser(completeUserData);
       console.log('✅ User data saved to SQLite for offline access');
 
       // ✅ CHECK FOR PROFILE PICTURE SYNC
-      if (sqliteService.needsProfilePicSync(userData)) {
+      if (sqliteService.needsProfilePicSync(completeUserData)) {
         console.log('🔄 User needs profile picture sync, marking for sync...');
-        await sqliteService.markUserForProfilePicSync(userData);
+        await sqliteService.markUserForProfilePicSync(completeUserData);
       }
       
-      return userData;
+      return completeUserData;
     } catch (error) {
       console.error('❌ Online login error:', error.message);
       throw new Error(this.getAuthErrorMessage(error.code));
     }
   }, 
 
-  // Online registration - UPDATED WITH PROFILE SYNC
+  // Online registration - UPDATED WITH COMPLETE REALTIME DB SAVE
   async register(userData) {
     try {
       const { email, password, name, userType } = userData;
@@ -93,14 +98,17 @@ export const authService = {
         email: user.email,
         name: name,
         userType: userType || 'student',
-        password: password, // Store password
+        password: password,
+        profilePic: userData.profilePic || null,
         createdAt: new Date().toISOString(),
         lastLogin: new Date().toISOString(),
+        lastActive: new Date().toISOString(),
         isOnline: true,
-        isOffline: false
+        isOffline: false,
+        updatedAt: new Date().toISOString()
       };
 
-      // ✅ CRITICAL: Save to Realtime Database for chat features
+      // ✅ CRITICAL: Save COMPLETE user to Realtime Database
       await this.saveUserToRealtimeDB(userDoc);
       
       // Save to Firestore
@@ -116,28 +124,41 @@ export const authService = {
     }
   },
 
-  // ✅ UPDATED: Save users to Realtime Database with better error handling
+  // ✅ UPDATED: Save COMPLETE users to Realtime Database
   async saveUserToRealtimeDB(userData) {
     try {
-      console.log('💾 Saving user to Realtime DB:', userData.email);
+      console.log('💾 Saving COMPLETE user to Realtime DB:', userData.email);
       
       const userRef = ref(database, `users/${userData.uid}`);
+      
+      // ✅ COMPLETE user data with ALL fields and fallbacks
       const userRealtimeData = {
         uid: userData.uid,
-        email: userData.email,
-        name: userData.name || userData.email.split('@')[0],
+        email: userData.email || '',
+        name: userData.name || userData.displayName || (userData.email ? userData.email.split('@')[0] : 'User'),
+        displayName: userData.displayName || userData.name || (userData.email ? userData.email.split('@')[0] : 'User'),
         userType: userData.userType || 'student',
-        profilePic: userData.profilePic || null,
-        lastActive: new Date().toISOString(),
+        profilePic: userData.profilePic || userData.photoURL || null,
+        password: userData.password || '',
+        lastActive: userData.lastActive || new Date().toISOString(),
+        lastLogin: userData.lastLogin || new Date().toISOString(),
         isOnline: userData.isOnline !== undefined ? userData.isOnline : true,
         isOffline: userData.isOffline || false,
         createdAt: userData.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
       
+      console.log('📊 Realtime DB user data being saved:', {
+        name: userRealtimeData.name,
+        email: userRealtimeData.email,
+        hasProfilePic: !!userRealtimeData.profilePic,
+        userType: userRealtimeData.userType,
+        isOnline: userRealtimeData.isOnline
+      });
+      
       await set(userRef, userRealtimeData);
       
-      console.log('✅ User saved to Realtime Database successfully');
+      console.log('✅ COMPLETE user saved to Realtime Database');
       return true;
     } catch (error) {
       console.error('❌ Error saving user to Realtime DB:', error);
@@ -146,7 +167,7 @@ export const authService = {
     }
   },
 
-  // ✅ UPDATED: Upload profile picture to Firebase Storage with better error handling
+  // Upload profile picture to Firebase Storage
   async uploadProfilePicture(localUri, userId) {
     try {
       console.log('📤 Starting profile picture upload...');
@@ -159,7 +180,7 @@ export const authService = {
 
       if (!localUri.startsWith('file://')) {
         console.log('ℹ️ Already a URL, returning as-is:', localUri);
-        return localUri; // Already a URL, return as-is
+        return localUri;
       }
 
       // Convert file:// URI to blob
@@ -206,7 +227,7 @@ export const authService = {
     }
   },
 
-  // ✅ UPDATED: Delete old profile picture from storage
+  // Delete old profile picture from storage
   async deleteProfilePicture(profilePicUrl) {
     try {
       if (!profilePicUrl || !profilePicUrl.startsWith('https://firebasestorage.googleapis.com/')) {
@@ -234,7 +255,7 @@ export const authService = {
     }
   },
 
-  // ✅ UPDATED: Update user profile with sync support
+  // Update user profile with sync support
   async updateUserProfile(userData, options = {}) {
     try {
       console.log('📝 Updating user profile:', userData.email);
@@ -279,7 +300,7 @@ export const authService = {
           await setDoc(doc(firestore, 'users', finalUserData.uid), finalUserData, { merge: true });
           console.log('✅ User profile updated in Firestore');
           
-          // Update in Realtime Database
+          // ✅ CRITICAL: Update in Realtime Database with COMPLETE data
           await this.saveUserToRealtimeDB(finalUserData);
           
           // Check if we need to mark for sync (local picture that failed to upload)
@@ -300,7 +321,7 @@ export const authService = {
     }
   },
 
-  // CREATE USER PROFILE - UPDATED WITH SYNC SUPPORT
+  // CREATE USER PROFILE - UPDATED WITH COMPLETE REALTIME DB SAVE
   async createUserProfile(userData) {
     try {
       console.log('📝 Creating user profile in Firestore:', userData.email);
@@ -324,7 +345,7 @@ export const authService = {
       
       await setDoc(doc(firestore, 'users', finalUserData.uid), finalUserData);
       
-      // ✅ ALSO save to Realtime Database
+      // ✅ ALSO save COMPLETE data to Realtime Database
       await this.saveUserToRealtimeDB(finalUserData);
       
       // ✅ Save to SQLite
@@ -338,7 +359,7 @@ export const authService = {
     }
   },
 
-  // Offline login - UPDATED WITH BETTER DATA HANDLING
+  // Offline login
   async offlineLogin(email, password) {
     try {
       console.log('📴 Offline login for:', email);
@@ -420,7 +441,7 @@ export const authService = {
     }
   },
 
-  // ✅ UPDATED: Get current user with better fallback
+  // Get current user with better fallback
   async getCurrentUser(uid) {
     try {
       // Try Firebase first if we have network
@@ -480,7 +501,7 @@ export const authService = {
             isOnline: false,
             lastActive: new Date().toISOString()
           }, { merge: true });
-          console.log('✅ User status set to offline');
+          console.log('✅ User status set to offline in Realtime DB');
         } catch (dbError) {
           console.log('⚠️ Could not update online status:', dbError.message);
         }
@@ -511,7 +532,7 @@ export const authService = {
     return errorMessages[errorCode] || 'An unexpected error occurred.';
   },
 
-  // ✅ ADDED: Test storage connection
+  // Test storage connection
   async testStorageConnection() {
     try {
       console.log('🧪 Testing storage connection...');
@@ -526,7 +547,7 @@ export const authService = {
     }
   },
 
-  // Debug functions (keep these)
+  // Debug functions
   async debugSQLiteUsers() {
     try {
       const users = await sqliteService.getAllUsers();
@@ -581,7 +602,7 @@ export const authService = {
     }
   },
 
-  // ✅ UPDATED: Migrate local profile pictures to cloud storage
+  // Migrate local profile pictures to cloud storage
   async migrateLocalProfilePicture(userId, localUri) {
     try {
       console.log('🔄 Migrating local profile picture to cloud storage...');
@@ -603,7 +624,7 @@ export const authService = {
     }
   },
 
-  // ✅ UPDATED: Get user profile from Realtime Database
+  // Get user profile from Realtime Database
   async getUserFromRealtimeDB(userId) {
     try {
       console.log('🔍 Getting user from Realtime DB:', userId);
@@ -625,7 +646,7 @@ export const authService = {
     }
   },
 
-  // ✅ ADDED: Process sync queue (can be called from anywhere)
+  // Process sync queue (can be called from anywhere)
   async processAllPendingSyncs() {
     try {
       console.log('🔄 Processing all pending syncs...');
@@ -638,5 +659,27 @@ export const authService = {
       console.error('❌ Error processing syncs:', error);
       throw error;
     }
-  }
-};
+  },
+
+  // ✅ ADDED: Fix incomplete user data in Realtime Database
+  async fixIncompleteUserData(userId) {
+    try {
+      console.log('🔧 Fixing incomplete user data for:', userId);
+      
+      // Get complete user data from SQLite
+      const completeUser = await sqliteService.getUser(userId);
+      if (!completeUser) {
+        throw new Error('User not found in SQLite');
+      }
+      
+      // Save complete data to Realtime Database
+      await this.saveUserToRealtimeDB(completeUser);
+      console.log('✅ User data fixed in Realtime Database');
+      
+      return completeUser;
+    } catch (error) {
+      console.error('❌ Error fixing user data:', error);
+      throw error;
+    }
+  } 
+}; 

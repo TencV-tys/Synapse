@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/authService';
 import sqliteService from '../services/sqliteService';
 import { database } from '../config/firebase';
-import { ref, set } from 'firebase/database';
+import { ref, set, get } from 'firebase/database';
 
 const ProfileScreen = ({ navigation }) => {
   const { user, setUser, isOnline, triggerSync } = useAuth();
@@ -154,6 +154,7 @@ const ProfileScreen = ({ navigation }) => {
     Alert.alert('Success', 'Profile picture removed! Remember to save your changes.');
   };
 
+  // ✅ IMPROVED: Enhanced profile saving with better Realtime DB handling
   const handleSaveProfile = async () => {
     if (!name.trim()) {
       Alert.alert('Error', 'Please enter your name');
@@ -233,13 +234,15 @@ const ProfileScreen = ({ navigation }) => {
         await sqliteService.markUserForProfilePicSync(updatedUser);
       }
 
-      // ✅ Save to Firebase Realtime Database if online
+      // ✅ IMPROVED: Save COMPLETE data to Firebase Realtime Database if online
       if (isOnline) {
         try {
-          console.log('🔥 Saving user to Firebase Realtime Database...');
+          console.log('🔥 Saving COMPLETE user to Firebase Realtime Database...');
           const userRef = ref(database, `users/${user.uid}`);
-          await set(userRef, updatedUser);
-          console.log('🔥✅ Profile saved to Firebase Realtime Database');
+          
+          // ✅ Use authService to ensure ALL fields are saved
+          await authService.saveUserToRealtimeDB(updatedUser);
+          console.log('🔥✅ COMPLETE profile saved to Firebase Realtime Database');
         } catch (firebaseError) {
           console.error('❌ Firebase save failed:', firebaseError);
           // Don't alert here - SQLite saved successfully
@@ -279,6 +282,7 @@ const ProfileScreen = ({ navigation }) => {
     setIsEditing(false);
   };
 
+  // ✅ IMPROVED: Enhanced manual sync with user data repair
   const handleManualSync = async () => {
     if (!isOnline) {
       Alert.alert('Offline', 'Cannot sync while offline. Please check your internet connection.');
@@ -287,19 +291,34 @@ const ProfileScreen = ({ navigation }) => {
 
     setLoading(true);
     try {
+      console.log('🔄 Manual sync triggered with user data repair...');
+      
+      // First, ensure current user has complete data in Realtime DB
+      try {
+        console.log('🔧 Ensuring complete user data in Realtime DB...');
+        await authService.saveUserToRealtimeDB(user);
+        console.log('✅ User data verified in Realtime DB');
+      } catch (userDataError) {
+        console.log('⚠️ Could not update user data:', userDataError.message);
+      }
+      
+      // Then process the sync queue
       const result = await triggerSync();
       if (result.success) {
         Alert.alert('Success', `Sync completed! Processed ${result.result.processed} items.`);
+        setSyncStatus('✅ Synced');
       } else {
         Alert.alert('Sync Failed', result.error);
       }
     } catch (error) {
+      console.error('❌ Manual sync failed:', error);
       Alert.alert('Error', 'Failed to sync: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // ✅ IMPROVED: Enhanced user data fixing with Realtime DB repair
   const fixExistingUserData = async () => {
     try {
       console.log('🔧 Fixing existing user data structure...');
@@ -330,15 +349,23 @@ const ProfileScreen = ({ navigation }) => {
       await sqliteService.saveUser(completeUser);
       console.log('💾✅ User data fixed in SQLite!');
       
-      // ✅ Save COMPLETE user object to Firebase if online
+      // ✅ IMPROVED: Save COMPLETE user object to Firebase Realtime Database if online
       if (isOnline) {
-        const userRef = ref(database, `users/${user.uid}`);
-        await set(userRef, completeUser);
-        console.log('🔥✅ User data fixed in Firebase!');
+        try {
+          console.log('🔥 Fixing user data in Firebase Realtime Database...');
+          await authService.saveUserToRealtimeDB(completeUser);
+          console.log('🔥✅ User data fixed in Firebase Realtime Database!');
+          
+          // Also try to fix other users' data in Realtime DB
+          await fixOtherUsersData();
+        } catch (firebaseError) {
+          console.error('❌ Firebase fix failed:', firebaseError);
+          // Continue anyway - SQLite was updated successfully
+        }
       }
       
       console.log('✅ User data structure fixed!');
-      Alert.alert('Success', 'User data structure has been fixed!');
+      Alert.alert('Success', 'User data structure has been fixed! Other users should now see your complete profile.');
       
       // ✅ Update local state immediately
       setUser(completeUser);
@@ -350,7 +377,53 @@ const ProfileScreen = ({ navigation }) => {
     }
   };
 
-  // Check sync status on component mount
+  // ✅ NEW: Function to fix other users' incomplete data in Realtime DB
+  const fixOtherUsersData = async () => {
+    try {
+      console.log('🔧 Checking and fixing other users data...');
+      
+      const usersRef = ref(database, 'users');
+      const snapshot = await get(usersRef);
+      
+      if (snapshot.exists()) {
+        const usersData = snapshot.val();
+        let fixedCount = 0;
+        
+        for (const [userId, userData] of Object.entries(usersData)) {
+          // Skip current user
+          if (userId === user.uid) continue;
+          
+          // Check if user data is incomplete (missing name, email, etc.)
+          if (!userData.name || !userData.email || !userData.userType) {
+            console.log(`🔧 Fixing incomplete user data for: ${userId}`);
+            
+            try {
+              // Try to get complete data from Firestore
+              const firestoreUser = await authService.getCurrentUser(userId);
+              if (firestoreUser) {
+                // Save complete data to Realtime DB
+                await authService.saveUserToRealtimeDB(firestoreUser);
+                fixedCount++;
+                console.log(`✅ Fixed user data for: ${firestoreUser.name || userId}`);
+              }
+            } catch (error) {
+              console.log(`⚠️ Could not fix user ${userId}:`, error.message);
+            }
+          }
+        }
+        
+        if (fixedCount > 0) {
+          console.log(`✅ Fixed ${fixedCount} users with incomplete data`);
+        } else {
+          console.log('✅ All users have complete data');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error fixing other users data:', error);
+    }
+  };
+
+  // ✅ IMPROVED: Check sync status and user data completeness
   useEffect(() => {
     const checkSyncStatus = async () => {
       try {
@@ -360,13 +433,32 @@ const ProfileScreen = ({ navigation }) => {
         } else {
           setSyncStatus('✅ Synced');
         }
+        
+        // Check if current user has complete data in Realtime DB
+        if (isOnline) {
+          try {
+            const userRef = ref(database, `users/${user.uid}`);
+            const snapshot = await get(userRef);
+            if (snapshot.exists()) {
+              const userData = snapshot.val();
+              const isComplete = userData.name && userData.email && userData.userType;
+              if (!isComplete) {
+                console.log('⚠️ User data incomplete in Realtime DB, auto-fixing...');
+                await authService.saveUserToRealtimeDB(user);
+                console.log('✅ User data auto-fixed in Realtime DB');
+              }
+            }
+          } catch (dbError) {
+            console.log('⚠️ Could not check user data completeness:', dbError.message);
+          }
+        }
       } catch (error) {
         console.error('❌ Error checking sync status:', error);
       }
     };
 
     checkSyncStatus();
-  }, [isOnline]);
+  }, [isOnline, user]);
 
   return (
     <View style={styles.container}>
@@ -452,7 +544,9 @@ const ProfileScreen = ({ navigation }) => {
                 onPress={handleManualSync}
                 disabled={loading}
               >
-                <Text style={styles.syncButtonText}>🔄 Sync Now</Text>
+                <Text style={styles.syncButtonText}>
+                  {loading ? '🔄 Syncing...' : '🔄 Sync Now'}
+                </Text>
               </TouchableOpacity>
             )}
             
@@ -460,8 +554,11 @@ const ProfileScreen = ({ navigation }) => {
               <TouchableOpacity 
                 style={styles.fixButton}
                 onPress={fixExistingUserData}
+                disabled={loading}
               >
-                <Text style={styles.fixButtonText}>🔧 Fix User Data</Text>
+                <Text style={styles.fixButtonText}>
+                  {loading ? '🔧 Fixing...' : '🔧 Repair User Data'}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -544,6 +641,31 @@ const ProfileScreen = ({ navigation }) => {
               <Text style={styles.infoLabel}>Sync Status</Text>
               <Text style={styles.infoValue}>{syncStatus}</Text>
             </View>
+
+            {/* ✅ NEW: Data Health Status */}
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Data Health</Text>
+              <Text style={[
+                styles.infoValue,
+                { color: syncStatus.includes('pending') ? '#f59e0b' : '#10b981' }
+              ]}>
+                {syncStatus.includes('pending') ? 'Needs Attention' : 'Healthy'}
+              </Text>
+            </View>
+          </View>
+
+          {/* ✅ NEW: Help Section */}
+          <View style={styles.helpSection}>
+            <Text style={styles.sectionTitle}>Need Help?</Text>
+            <Text style={styles.helpText}>
+              • <Text style={styles.helpBold}>Sync Now</Text>: Uploads pending profile pictures and syncs data
+            </Text>
+            <Text style={styles.helpText}>
+              • <Text style={styles.helpBold}>Repair User Data</Text>: Fixes incomplete profile data for better chat experience
+            </Text>
+            <Text style={styles.helpText}>
+              • Profile pictures taken offline will auto-sync when you're online
+            </Text>
           </View>
         </View>
       </ScrollView>
@@ -883,6 +1005,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    marginBottom: 20,
   },
   sectionTitle: {
     fontSize: 18,
@@ -906,6 +1029,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#334155',
     fontWeight: '500',
+  },
+  // Help Section Styles
+  helpSection: {
+    backgroundColor: '#f0f9ff',
+    borderRadius: 12,
+    padding: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#0ea5e9',
+  },
+  helpText: {
+    fontSize: 14,
+    color: '#475569',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  helpBold: {
+    fontWeight: '600',
+    color: '#334155',
   },
 });
 

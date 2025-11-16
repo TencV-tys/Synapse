@@ -13,8 +13,9 @@ import {
   RefreshControl
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { database } from '../config/firebase';
+import { database, firestore } from '../config/firebase';
 import { ref, onValue, off, set, get } from 'firebase/database';
+import { doc, getDoc } from 'firebase/firestore';
 
 const DirectMessagesScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -26,39 +27,116 @@ const DirectMessagesScreen = ({ navigation }) => {
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
 
+  // ✅ Function to get complete user data from Firestore
+  const getCompleteUserData = async (userId, realtimeData) => {
+    try {
+      console.log(`🔍 Fetching complete data from Firestore for: ${userId}`);
+      
+      const userDoc = await getDoc(doc(firestore, 'users', userId));
+      
+      if (userDoc.exists()) {
+        const firestoreData = userDoc.data();
+        console.log(`✅ Found complete user data in Firestore: ${firestoreData.name || userId}`);
+        
+        // Merge Realtime data with Firestore data
+        return {
+          id: userId,
+          uid: userId,
+          name: firestoreData.name || firestoreData.displayName || 
+                (firestoreData.email ? firestoreData.email.split('@')[0] : 'User'),
+          email: firestoreData.email || 'No email',
+          profilePic: firestoreData.profilePic || firestoreData.photoURL || null,
+          userType: firestoreData.userType || 'student',
+          lastActive: realtimeData.lastActive || firestoreData.lastActive,
+          isOnline: realtimeData.isOnline !== undefined ? realtimeData.isOnline : true,
+          createdAt: firestoreData.createdAt,
+          ...realtimeData,
+          ...firestoreData
+        };
+      } else {
+        console.log(`❌ User ${userId} not found in Firestore, using Realtime data`);
+        return {
+          id: userId,
+          uid: userId,
+          name: realtimeData.name || realtimeData.displayName || 
+                (realtimeData.email ? realtimeData.email.split('@')[0] : 'User'),
+          email: realtimeData.email || 'No email',
+          profilePic: realtimeData.profilePic || realtimeData.photoURL || null,
+          userType: realtimeData.userType || 'student',
+          lastActive: realtimeData.lastActive,
+          isOnline: realtimeData.isOnline,
+          createdAt: realtimeData.createdAt,
+          ...realtimeData
+        };
+      }
+    } catch (error) {
+      console.error(`❌ Error fetching Firestore data for ${userId}:`, error);
+      return {
+        id: userId,
+        uid: userId,
+        name: realtimeData.name || realtimeData.displayName || 
+              (realtimeData.email ? realtimeData.email.split('@')[0] : 'User'),
+        email: realtimeData.email || 'No email',
+        profilePic: realtimeData.profilePic || realtimeData.photoURL || null,
+        userType: realtimeData.userType || 'student',
+        lastActive: realtimeData.lastActive,
+        isOnline: realtimeData.isOnline,
+        createdAt: realtimeData.createdAt,
+        ...realtimeData
+      };
+    }
+  };
+
   const loadUsers = () => {
     return new Promise((resolve) => {
       const usersRef = ref(database, 'users');
       console.log('🔍 Setting up users listener...');
       
-      const usersUnsubscribe = onValue(usersRef, (snapshot) => {
+      const usersUnsubscribe = onValue(usersRef, async (snapshot) => {
         try {
           const data = snapshot.val();
-          console.log('📊 Users data received:', data);
+          console.log('📊 Users data received from Realtime DB:', data);
           
           if (data) {
-            const usersArray = Object.entries(data)
-              .map(([id, userData]) => ({
-                id,
-                uid: id,
-                // ✅ COMPLETE user data with profile picture
-                name: userData.name || userData.displayName || (userData.email ? userData.email.split('@')[0] : 'User'),
-                email: userData.email || 'No email',
-                profilePic: userData.profilePic || userData.photoURL || null, // ✅ PROFILE PICTURE
-                userType: userData.userType || 'student',
-                lastActive: userData.lastActive,
-                isOnline: userData.isOnline,
-                createdAt: userData.createdAt,
-                ...userData
-              }))
-              .filter(u => u.id !== user?.uid && u.uid !== user?.uid);
+            const usersPromises = Object.entries(data)
+              .filter(([id]) => id !== user?.uid)
+              .map(async ([id, userData]) => {
+                // ✅ CHECK if user data is incomplete
+                const isIncomplete = !userData.name || !userData.email || !userData.userType;
+                
+                if (isIncomplete) {
+                  console.log(`🔄 User ${id} has incomplete data, fetching from Firestore...`);
+                  return await getCompleteUserData(id, userData);
+                } else {
+                  console.log(`✅ User ${id} has complete data in Realtime DB`);
+                  return {
+                    id,
+                    uid: id,
+                    name: userData.name || userData.displayName || 
+                          (userData.email ? userData.email.split('@')[0] : 'User'),
+                    email: userData.email || 'No email',
+                    profilePic: userData.profilePic || userData.photoURL || null,
+                    userType: userData.userType || 'student',
+                    lastActive: userData.lastActive,
+                    isOnline: userData.isOnline,
+                    createdAt: userData.createdAt,
+                    ...userData
+                  };
+                }
+              });
+
+            const usersArray = await Promise.all(usersPromises);
             
             console.log(`👥 Processed ${usersArray.length} users (excluding current user)`);
             
-            // Log profile picture status for debugging
             usersArray.forEach(u => {
-              console.log(`👤 ${u.name}: profilePic = ${u.profilePic ? '✅' : '❌'}`);
-              console.log(`📸 Profile pic URL: ${u.profilePic || 'NULL'}`);
+              console.log(`👤 ${u.name}:`, {
+                source: u.createdAt ? 'Firestore+Realtime' : 'Realtime Only',
+                profilePic: u.profilePic ? '✅' : '❌',
+                email: u.email,
+                userType: u.userType,
+                isOnline: u.isOnline
+              });
             });
             
             setUsers(usersArray);
@@ -78,7 +156,6 @@ const DirectMessagesScreen = ({ navigation }) => {
         }
       }, (error) => {
         console.error('❌ Firebase users listener error:', error);
-        console.error('Error code:', error.code, 'Message:', error.message);
         setLoading(false);
         setRefreshing(false);
         setHasData(false);
@@ -97,14 +174,12 @@ const DirectMessagesScreen = ({ navigation }) => {
         if (data) {
           const recentChatsArray = [];
           
-          // Find chats involving current user and get last message
           Object.entries(data).forEach(([chatId, messages]) => {
             if (chatId.includes(user?.uid)) {
               const messageArray = Object.values(messages);
               const lastMessage = messageArray[messageArray.length - 1];
               
               if (lastMessage) {
-                // Extract the other user's ID from chat ID
                 const userIds = chatId.split('_');
                 const otherUserId = userIds.find(id => id !== user?.uid);
                 
@@ -120,7 +195,6 @@ const DirectMessagesScreen = ({ navigation }) => {
             }
           });
           
-          // Sort by timestamp
           recentChatsArray.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
           setRecentChats(recentChatsArray);
         }
@@ -164,7 +238,7 @@ const DirectMessagesScreen = ({ navigation }) => {
         id: targetUser.id,
         name: targetUser.name,
         email: targetUser.email,
-        profilePic: targetUser.profilePic, // ✅ PROFILE PICTURE INCLUDED
+        profilePic: targetUser.profilePic,
         userType: targetUser.userType
       }
     });
@@ -174,40 +248,43 @@ const DirectMessagesScreen = ({ navigation }) => {
     try {
       console.log('👤 Showing profile for:', userData);
       
-      // Get fresh user data from Firebase to ensure we have the latest
-      const userRef = ref(database, `users/${userData.id}`);
-      
-      onValue(userRef, (snapshot) => {
-        const freshUserData = snapshot.val();
-        if (freshUserData) {
+      try {
+        const userDoc = await getDoc(doc(firestore, 'users', userData.id));
+        if (userDoc.exists()) {
+          const firestoreData = userDoc.data();
           const completeUserData = {
             id: userData.id,
-            name: freshUserData.name || freshUserData.displayName || (freshUserData.email ? freshUserData.email.split('@')[0] : 'User'),
-            email: freshUserData.email || 'No email',
-            profilePic: freshUserData.profilePic || freshUserData.photoURL || null, // ✅ PROFILE PICTURE
-            userType: freshUserData.userType || 'student',
-            lastActive: freshUserData.lastActive,
-            isOnline: freshUserData.isOnline,
-            createdAt: freshUserData.createdAt,
-            ...freshUserData
+            name: firestoreData.name || firestoreData.displayName || 
+                  (firestoreData.email ? firestoreData.email.split('@')[0] : 'User'),
+            email: firestoreData.email || 'No email',
+            profilePic: firestoreData.profilePic || firestoreData.photoURL || null,
+            userType: firestoreData.userType || 'student',
+            lastActive: userData.lastActive || firestoreData.lastActive,
+            isOnline: userData.isOnline,
+            createdAt: firestoreData.createdAt || userData.createdAt,
+            ...firestoreData
           };
           setSelectedUser(completeUserData);
           setShowUserProfile(true);
+          return;
         }
-      }, { onlyOnce: true });
+      } catch (firestoreError) {
+        console.log('⚠️ Could not fetch from Firestore, using existing data');
+      }
+      
+      setSelectedUser(userData);
+      setShowUserProfile(true);
       
     } catch (error) {
       console.error('❌ Error loading user profile:', error);
-      // Fallback to the data we already have
       setSelectedUser(userData);
       setShowUserProfile(true);
     }
   };
 
-  // ✅ FIXED: Demo users with profile pictures
   const createDemoUsers = async () => {
     try {
-      console.log('🎭 Creating demo users with profile pictures...');
+      console.log('🎭 Creating demo users with COMPLETE profile data...');
       
       const demoUsers = [
         {
@@ -248,17 +325,22 @@ const DirectMessagesScreen = ({ navigation }) => {
         }
       ];
 
-      // Save demo users to Firebase
       for (const demoUser of demoUsers) {
-        const userRef = ref(database, `users/${demoUser.id}`);
-        await set(userRef, demoUser);
-        console.log(`✅ Created demo user: ${demoUser.name}`);
-        console.log(`🖼️ Profile pic: ${demoUser.profilePic ? '✅' : '❌'}`);
+        try {
+          const userRef = ref(database, `users/${demoUser.id}`);
+          await set(userRef, demoUser);
+          console.log(`✅ Created demo user in Realtime DB: ${demoUser.name}`);
+          
+          await setDoc(doc(firestore, 'users', demoUser.id), demoUser);
+          console.log(`✅ Created demo user in Firestore: ${demoUser.name}`);
+          
+        } catch (userError) {
+          console.error(`❌ Error creating demo user ${demoUser.name}:`, userError);
+        }
       }
 
-      Alert.alert('Demo Users Created', 'Demo users with profile pictures have been created!');
+      Alert.alert('Demo Users Created', 'Demo users with complete profile data have been created in both databases!');
       
-      // Reload users
       await loadUsers();
       
     } catch (error) {
@@ -268,7 +350,6 @@ const DirectMessagesScreen = ({ navigation }) => {
   };
 
   const continueChat = (chat) => {
-    // Find user info for this chat
     const userInfo = users.find(u => u.id === chat.otherUserId);
     if (userInfo) {
       navigation.navigate('Chat', {
@@ -277,28 +358,32 @@ const DirectMessagesScreen = ({ navigation }) => {
           id: userInfo.id,
           name: userInfo.name,
           email: userInfo.email,
-          profilePic: userInfo.profilePic, // ✅ PROFILE PICTURE
+          profilePic: userInfo.profilePic,
           userType: userInfo.userType
         }
       });
     } else {
-      // If user not in current list, try to fetch fresh data
-      const userRef = ref(database, `users/${chat.otherUserId}`);
-      onValue(userRef, (snapshot) => {
-        const userData = snapshot.val();
-        if (userData) {
-          navigation.navigate('Chat', {
-            directMessage: true,
-            targetUser: {
-              id: chat.otherUserId,
-              name: userData.name || userData.displayName || (userData.email ? userData.email.split('@')[0] : 'User'),
-              email: userData.email,
-              profilePic: userData.profilePic || userData.photoURL, // ✅ PROFILE PICTURE
-              userType: userData.userType
-            }
-          });
+      const fetchUserFromFirestore = async () => {
+        try {
+          const userDoc = await getDoc(doc(firestore, 'users', chat.otherUserId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            navigation.navigate('Chat', {
+              directMessage: true,
+              targetUser: {
+                id: chat.otherUserId,
+                name: userData.name || userData.displayName || (userData.email ? userData.email.split('@')[0] : 'User'),
+                email: userData.email,
+                profilePic: userData.profilePic || userData.photoURL,
+                userType: userData.userType
+              }
+            });
+          }
+        } catch (error) {
+          console.error('❌ Error fetching user from Firestore:', error);
         }
-      }, { onlyOnce: true });
+      };
+      fetchUserFromFirestore();
     }
   };
 
@@ -339,7 +424,6 @@ const DirectMessagesScreen = ({ navigation }) => {
     return `${days}d ago`;
   };
 
-  // ✅ FIXED: Render user item with proper profile picture handling
   const renderUserItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.userItem}
@@ -461,7 +545,6 @@ const DirectMessagesScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>💬 Direct Messages</Text>
         <TouchableOpacity onPress={onRefresh} disabled={refreshing}>
@@ -537,7 +620,6 @@ const DirectMessagesScreen = ({ navigation }) => {
         />
       )}
 
-      {/* User Profile Modal */}
       <Modal
         visible={showUserProfile}
         animationType="slide"
@@ -616,6 +698,7 @@ const DirectMessagesScreen = ({ navigation }) => {
     </View>
   );
 };
+
 const styles = StyleSheet.create({
   container: {
     flex: 1, 
@@ -843,7 +926,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
     fontStyle: 'italic',
   },
-  // Modal Styles
   modalContainer: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -945,4 +1027,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default DirectMessagesScreen; 
+export default DirectMessagesScreen;
