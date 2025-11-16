@@ -8,11 +8,11 @@ let isRealSQLite = false;
 function createEnhancedMockDatabase() {
   console.log('🔄 Creating enhanced mock database for React Native');
   
-  // Use in-memory storage for React Native - ADD CATEGORIES HERE
+  // Use in-memory storage for React Native
   const mockData = {
     users: {},
     notes: {},
-    categories: {}, // ✅ ADDED CATEGORIES
+    categories: {},
     syncQueue: {}
   };
 
@@ -32,19 +32,26 @@ function createEnhancedMockDatabase() {
               
               // Handle different SQL operations
               if (sqlLower.startsWith('insert or replace into users')) {
-                // Save user
-                const [uid, email, name, userType, password, createdAt, lastLogin, isOffline] = params;
+                // Save user - COMPLETE PROFILE PICTURE HANDLING
+                const [uid, email, name, userType, password, profilePic, createdAt, lastLogin, lastActive, isOnline, isOffline] = params;
+                
                 mockData.users[uid] = { 
                   uid, 
                   email, 
                   name, 
                   userType: userType || 'student',
                   password: password || '',
+                  profilePic: profilePic || null,
                   createdAt: createdAt || new Date().toISOString(),
                   lastLogin: lastLogin || new Date().toISOString(),
+                  lastActive: lastActive || new Date().toISOString(),
+                  isOnline: isOnline === 1,
                   isOffline: isOffline === 1 
                 };
                 console.log('💾 [MOCK] User saved:', email);
+                console.log('🖼️ Profile pic saved:', profilePic ? 'YES' : 'NO');
+                console.log('📸 Profile pic URL:', profilePic || 'NULL');
+                
                 if (successCallback) {
                   successCallback(mockTransaction, {
                     insertId: 1,
@@ -62,6 +69,9 @@ function createEnhancedMockDatabase() {
                 const uid = params[0];
                 const user = mockData.users[uid] || null;
                 console.log('👤 [MOCK] User retrieved by ID:', user ? user.email : 'Not found');
+                console.log('🖼️ Profile pic in retrieved user:', user?.profilePic ? 'YES' : 'NO');
+                console.log('📸 Retrieved profile pic URL:', user?.profilePic || 'NULL');
+                
                 if (successCallback) {
                   successCallback(mockTransaction, {
                     rows: {
@@ -76,6 +86,10 @@ function createEnhancedMockDatabase() {
                 // Get all users
                 const users = Object.values(mockData.users);
                 console.log(`👥 [MOCK] All users retrieved: ${users.length}`);
+                users.forEach(user => {
+                  console.log(`👤 ${user.name}: profilePic = ${user.profilePic ? '✅' : '❌'}`);
+                });
+                
                 if (successCallback) {
                   successCallback(mockTransaction, {
                     rows: {
@@ -85,20 +99,80 @@ function createEnhancedMockDatabase() {
                     }
                   });
                 }
+
+              } else if (sqlLower.startsWith('insert or replace into syncqueue')) {
+                // Add to sync queue
+                const [id, tableName, recordId, operation, data, createdAt, status] = params;
+                
+                mockData.syncQueue[id] = {
+                  id,
+                  tableName,
+                  recordId,
+                  operation,
+                  data: typeof data === 'string' ? JSON.parse(data) : data,
+                  createdAt: createdAt || new Date().toISOString(),
+                  status: status || 'pending'
+                };
+                console.log('🔄 [MOCK] Added to sync queue:', operation, recordId);
+                
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    insertId: 1,
+                    rowsAffected: 1,
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
+
+              } else if (sqlLower.startsWith('select * from syncqueue where status = ?')) {
+                // Get sync queue
+                const status = params[0];
+                const syncItems = Object.values(mockData.syncQueue).filter(item => item.status === status);
+                console.log(`🔄 [MOCK] Sync queue items with status ${status}:`, syncItems.length);
+                
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rows: {
+                      _array: syncItems,
+                      length: syncItems.length,
+                      item: (index) => syncItems[index] || null
+                    }
+                  });
+                }
+
+              } else if (sqlLower.startsWith('delete from syncqueue where id = ?')) {
+                // Remove from sync queue
+                const syncId = params[0];
+                const existed = mockData.syncQueue.hasOwnProperty(syncId);
+                delete mockData.syncQueue[syncId];
+                console.log('🗑️ [MOCK] Removed from sync queue:', syncId, existed ? '(existed)' : '(did not exist)');
+                
+                if (successCallback) {
+                  successCallback(mockTransaction, {
+                    rowsAffected: existed ? 1 : 0,
+                    rows: {
+                      _array: [],
+                      length: 0,
+                      item: () => null
+                    }
+                  });
+                }
                 
               } else if (sqlLower.startsWith('insert or replace into notes')) {
-                // Save note - handle partial updates by merging with existing data
+                // Save note
                 const [id, userId, title, content, tags, isPinned, isFavorite, permission, createdAt, updatedAt, syncStatus] = params;
                 
-                // Get existing note data to preserve fields that aren't being updated
                 const existingNote = mockData.notes[id] || {};
                 
                 const updatedNote = {
-                  ...existingNote, // Keep existing fields
+                  ...existingNote,
                   id, 
-                  userId: userId || existingNote.userId, // Use new value or keep existing
-                  title: title || existingNote.title || 'Untitled Note', // Use new value or keep existing
-                  content: content || existingNote.content || '', // Use new value or keep existing
+                  userId: userId || existingNote.userId,
+                  title: title || existingNote.title || 'Untitled Note',
+                  content: content || existingNote.content || '',
                   tags: typeof tags === 'string' ? JSON.parse(tags) : (tags || existingNote.tags || []),
                   isPinned: isPinned === 1 ? true : (isPinned === 0 ? false : (existingNote.isPinned || false)),
                   isFavorite: isFavorite === 1 ? true : (isFavorite === 0 ? false : (existingNote.isFavorite || false)),
@@ -115,161 +189,6 @@ function createEnhancedMockDatabase() {
                   successCallback(mockTransaction, {
                     insertId: 1,
                     rowsAffected: 1,
-                    rows: {
-                      _array: [],
-                      length: 0,
-                      item: () => null
-                    }
-                  });
-                }
-                
-              } else if (sqlLower.startsWith('select * from notes where userid = ?')) {
-                // Get notes for user
-                const userId = params[0];
-                const userNotes = Object.values(mockData.notes).filter(note => note.userId === userId);
-                console.log('📝 [MOCK] Notes retrieved for user:', userNotes.length);
-                if (successCallback) {
-                  successCallback(mockTransaction, {
-                    rows: {
-                      _array: userNotes,
-                      length: userNotes.length,
-                      item: (index) => userNotes[index] || null
-                    }
-                  });
-                }
-                
-              } else if (sqlLower.startsWith('select * from notes where id = ?')) {
-                // Get note by ID
-                const noteId = params[0];
-                const note = mockData.notes[noteId] || null;
-                console.log('📄 [MOCK] Note retrieved by ID:', note ? note.title : 'Not found');
-                if (successCallback) {
-                  successCallback(mockTransaction, {
-                    rows: {
-                      _array: note ? [note] : [],
-                      length: note ? 1 : 0,
-                      item: (index) => note ? note : null
-                    }
-                  });
-                }
-                
-              } else if (sqlLower.startsWith('delete from notes where id = ?')) {
-                // Delete note
-                const noteId = params[0];
-                const existed = mockData.notes.hasOwnProperty(noteId);
-                delete mockData.notes[noteId];
-                console.log('🗑️ [MOCK] Note deleted:', noteId, existed ? '(existed)' : '(did not exist)');
-                if (successCallback) {
-                  successCallback(mockTransaction, {
-                    rowsAffected: existed ? 1 : 0,
-                    rows: {
-                      _array: [],
-                      length: 0,
-                      item: () => null
-                    }
-                  });
-                }
-
-              // ✅ ADD CATEGORIES HANDLING HERE
-              } else if (sqlLower.startsWith('select * from categories where userid = ?')) {
-                // Get categories for user
-                const userId = params[0];
-                const userCategories = Object.values(mockData.categories).filter(cat => cat.userId === userId);
-                console.log('📂 [MOCK] Categories retrieved for user:', userCategories.length);
-                if (successCallback) {
-                  successCallback(mockTransaction, {
-                    rows: {
-                      _array: userCategories,
-                      length: userCategories.length,
-                      item: (index) => userCategories[index] || null
-                    }
-                  });
-                }
-                
-              } else if (sqlLower.startsWith('insert or replace into categories')) {
-                // Save category
-                const [id, name, color, userId, createdAt, updatedAt, noteCount, syncStatus] = params;
-                
-                mockData.categories[id] = {
-                  id, 
-                  name, 
-                  color, 
-                  userId,
-                  createdAt: createdAt || new Date().toISOString(),
-                  updatedAt: updatedAt || new Date().toISOString(),
-                  noteCount: noteCount || 0,
-                  syncStatus: syncStatus || 'synced'
-                };
-                console.log('💾 [MOCK] Category saved:', name);
-                if (successCallback) {
-                  successCallback(mockTransaction, {
-                    insertId: 1,
-                    rowsAffected: 1,
-                    rows: {
-                      _array: [],
-                      length: 0,
-                      item: () => null
-                    }
-                  });
-                }
-                
-              } else if (sqlLower.startsWith('select * from categories where id = ?')) {
-                // Get category by ID
-                const categoryId = params[0];
-                const category = mockData.categories[categoryId] || null;
-                console.log('📁 [MOCK] Category retrieved by ID:', category ? category.name : 'Not found');
-                if (successCallback) {
-                  successCallback(mockTransaction, {
-                    rows: {
-                      _array: category ? [category] : [],
-                      length: category ? 1 : 0,
-                      item: (index) => category ? category : null
-                    }
-                  });
-                }
-                
-              } else if (sqlLower.startsWith('delete from categories where id = ?')) {
-                // Delete category
-                const categoryId = params[0];
-                const existed = mockData.categories.hasOwnProperty(categoryId);
-                delete mockData.categories[categoryId];
-                console.log('🗑️ [MOCK] Category deleted:', categoryId, existed ? '(existed)' : '(did not exist)');
-                if (successCallback) {
-                  successCallback(mockTransaction, {
-                    rowsAffected: existed ? 1 : 0,
-                    rows: {
-                      _array: [],
-                      length: 0,
-                      item: () => null
-                    }
-                  });
-                }
-                
-              } else if (sqlLower.startsWith('update categories set notecount')) {
-                // Update category note count
-                const [noteCount, updatedAt, categoryId] = params;
-                const category = mockData.categories[categoryId];
-                if (category) {
-                  category.noteCount = noteCount;
-                  category.updatedAt = updatedAt;
-                  console.log('📊 [MOCK] Category note count updated:', categoryId, noteCount);
-                }
-                if (successCallback) {
-                  successCallback(mockTransaction, {
-                    rowsAffected: category ? 1 : 0,
-                    rows: {
-                      _array: [],
-                      length: 0,
-                      item: () => null
-                    }
-                  });
-                }
-                
-              } else if (sqlLower.startsWith('create table')) {
-                // Table creation - always succeed
-                console.log('📊 [MOCK] Table creation attempted');
-                if (successCallback) {
-                  successCallback(mockTransaction, {
                     rows: {
                       _array: [],
                       length: 0,
@@ -317,7 +236,7 @@ isRealSQLite = false;
 
 console.log('✅ SQLite service initialized with Mock Database');
 
-// User operations
+// User operations - COMPLETE PROFILE PICTURE HANDLING
 const saveUser = async (user) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -326,27 +245,34 @@ const saveUser = async (user) => {
       return;
     }
 
+    console.log('💾 Saving user to SQLite:', user.email);
+    console.log('🖼️ Profile pic to save:', user.profilePic ? 'YES' : 'NO');
+    console.log('📸 Profile pic URL:', user.profilePic || 'NULL');
+
     db.transaction(tx => {
       tx.executeSql(
-        `INSERT OR REPLACE INTO users (uid, email, name, userType, password, createdAt, lastLogin, isOffline) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO users (uid, email, name, userType, password, profilePic, createdAt, lastLogin, lastActive, isOnline, isOffline) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           user.uid, 
           user.email, 
           user.name, 
           user.userType || 'student',
-          user.password || '', // ✅ Ensure password is never undefined
+          user.password || '',
+          user.profilePic || null,
           user.createdAt || new Date().toISOString(),
           user.lastLogin || new Date().toISOString(),
+          user.lastActive || new Date().toISOString(),
+          user.isOnline ? 1 : 0,
           user.isOffline ? 1 : 0
         ],
         (tx, result) => {
-          console.log('💾 [MOCK] User saved successfully:', user.email);
-          console.log('🔑 Password saved:', user.password ? 'YES' : 'NO');
+          console.log('💾✅ User saved successfully to SQLite:', user.email);
+          console.log('🖼️✅ Profile pic saved to SQLite:', user.profilePic ? 'YES' : 'NO');
           resolve(result);
         },
         (tx, error) => {
-          console.log('⚠️ Could not save user:', error);
+          console.log('⚠️ Could not save user to SQLite:', error);
           resolve();
         }
       );
@@ -369,15 +295,17 @@ const getUser = async (uid) => {
         (tx, result) => {
           const user = result.rows._array[0] || null;
           if (user) {
-            console.log('👤 [MOCK] User found:', user.email);
+            console.log('👤✅ User retrieved from SQLite:', user.email);
+            console.log('🖼️✅ Profile pic in SQLite:', user.profilePic ? 'YES' : 'NO');
+            console.log('📸 Profile pic URL from SQLite:', user.profilePic || 'NULL');
           } else {
-            console.log('👤 [MOCK] User not found for ID:', uid);
+            console.log('👤❌ User not found in SQLite for ID:', uid);
           }
           resolve(user);
         },
         (tx, error) => {
-          console.log('⚠️ Could not get user:', error);
-          resolve(null); // Resolve with null instead of rejecting
+          console.log('⚠️ Could not get user from SQLite:', error);
+          resolve(null);
         }
       );
     });
@@ -398,16 +326,233 @@ const getAllUsers = async () => {
         [],
         (tx, result) => {
           const users = result.rows._array || [];
-          console.log(`👥 [MOCK] Retrieved ${users.length} users from database`);
+          console.log(`👥✅ Retrieved ${users.length} users from SQLite`);
+          users.forEach(user => {
+            console.log(`👤 ${user.name}: profilePic = ${user.profilePic ? '✅' : '❌'}`);
+          });
           resolve(users);
         },
         (tx, error) => {
-          console.log('⚠️ Could not get users:', error);
-          resolve([]); // Always resolve with empty array
+          console.log('⚠️ Could not get users from SQLite:', error);
+          resolve([]);
         }
       );
     });
   });
+};
+
+// ✅ SYNC FUNCTIONS
+const addToSyncQueue = async (tableName, recordId, operation, data) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve();
+      return;
+    }
+
+    const syncId = `${tableName}_${recordId}_${Date.now()}`;
+    const dataString = JSON.stringify(data || {});
+
+    console.log('🔄 Adding to sync queue:', operation, recordId);
+
+    db.transaction(tx => {
+      tx.executeSql(
+        `INSERT OR REPLACE INTO syncQueue (id, tableName, recordId, operation, data, createdAt, status) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          syncId,
+          tableName,
+          recordId,
+          operation,
+          dataString,
+          new Date().toISOString(),
+          'pending'
+        ],
+        (tx, result) => {
+          console.log('🔄✅ Added to sync queue:', operation, recordId);
+          resolve(result);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not add to sync queue:', error);
+          resolve();
+        }
+      );
+    });
+  });
+};
+
+const getSyncQueue = async () => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve([]);
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT * FROM syncQueue WHERE status = ? ORDER BY createdAt ASC',
+        ['pending'],
+        (tx, result) => {
+          const syncItems = result.rows._array || [];
+          console.log(`🔄✅ Retrieved ${syncItems.length} sync queue items`);
+          
+          // Parse JSON data
+          const parsedItems = syncItems.map(item => ({
+            ...item,
+            data: typeof item.data === 'string' ? JSON.parse(item.data) : item.data
+          }));
+          
+          resolve(parsedItems);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not get sync queue:', error);
+          resolve([]);
+        }
+      );
+    });
+  });
+};
+
+const removeFromSyncQueue = async (syncId) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve();
+      return;
+    }
+
+    console.log('🗑️ Removing from sync queue:', syncId);
+
+    db.transaction(tx => {
+      tx.executeSql(
+        'DELETE FROM syncQueue WHERE id = ?',
+        [syncId],
+        (tx, result) => {
+          console.log('🗑️✅ Removed from sync queue:', syncId);
+          resolve(result);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not remove from sync queue:', error);
+          resolve();
+        }
+      );
+    });
+  });
+};
+
+const markNoteForSync = async (noteId, operation, data) => {
+  console.log('🔄 Marking note for sync:', operation, noteId);
+  return addToSyncQueue('notes', noteId, operation, data);
+};
+
+// ✅ PROFILE PICTURE SYNC FUNCTIONS
+const needsProfilePicSync = (user) => {
+  if (!user || !user.profilePic) return false;
+  
+  const isLocalFile = user.profilePic.startsWith('file://');
+  const isOnlineUser = !user.isOffline;
+  
+  return isLocalFile && isOnlineUser;
+};
+
+const markUserForProfilePicSync = async (user) => {
+  if (!needsProfilePicSync(user)) {
+    console.log('ℹ️ User does not need profile picture sync');
+    return;
+  }
+  
+  console.log('🔄 Marking user for profile picture sync:', user.email);
+  
+  return addToSyncQueue('users', user.uid, 'upload_profile_pic', {
+    userId: user.uid,
+    profilePicUri: user.profilePic,
+    email: user.email,
+    name: user.name
+  });
+};
+
+const processProfilePicSync = async (syncItem, uploadFunction) => {
+  try {
+    console.log('🔄 Processing profile picture sync for:', syncItem.data.email);
+    
+    const { userId, profilePicUri } = syncItem.data;
+    
+    if (!profilePicUri || !profilePicUri.startsWith('file://')) {
+      console.log('❌ Invalid profile picture URI for sync');
+      return { success: false, error: 'Invalid profile picture URI' };
+    }
+    
+    // Upload profile picture to Firebase Storage
+    const downloadURL = await uploadFunction(profilePicUri, userId);
+    console.log('✅ Profile picture uploaded during sync:', downloadURL);
+    
+    // Update user in SQLite with new URL
+    const currentUser = await getUser(userId);
+    if (currentUser) {
+      const updatedUser = {
+        ...currentUser,
+        profilePic: downloadURL,
+        updatedAt: new Date().toISOString()
+      };
+      
+      await saveUser(updatedUser);
+      console.log('✅ User updated in SQLite with cloud profile picture');
+    }
+    
+    return { success: true, downloadURL };
+  } catch (error) {
+    console.error('❌ Error processing profile picture sync:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// ✅ AUTO SYNC FUNCTION
+const processPendingSyncQueue = async (uploadFunction) => {
+  try {
+    console.log('🔄 Processing pending sync queue...');
+    const pendingItems = await getSyncQueue();
+    
+    if (pendingItems.length === 0) {
+      console.log('ℹ️ No pending sync items');
+      return { processed: 0, failed: 0 };
+    }
+    
+    let processed = 0;
+    let failed = 0;
+    
+    for (const item of pendingItems) {
+      try {
+        if (item.operation === 'upload_profile_pic') {
+          console.log('📸 Processing profile picture sync item:', item.id);
+          const result = await processProfilePicSync(item, uploadFunction);
+          
+          if (result.success) {
+            await removeFromSyncQueue(item.id);
+            processed++;
+            console.log('✅ Profile picture sync completed:', item.id);
+          } else {
+            failed++;
+            console.log('❌ Profile picture sync failed:', item.id, result.error);
+          }
+        } else {
+          // Handle other sync operations
+          console.log('⚡ Processing other sync item:', item.operation);
+          await removeFromSyncQueue(item.id);
+          processed++;
+        }
+      } catch (error) {
+        failed++;
+        console.error('❌ Error processing sync item:', item.id, error);
+      }
+    }
+    
+    console.log(`🔄 Sync completed: ${processed} processed, ${failed} failed`);
+    return { processed, failed };
+  } catch (error) {
+    console.error('❌ Error processing sync queue:', error);
+    return { processed: 0, failed: 0 };
+  }
 };
 
 // Note operations
@@ -450,8 +595,8 @@ const saveNote = async (note) => {
       );
     }); 
   }); 
-}; 
- 
+};
+
 const getNotes = async (userId) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -469,11 +614,9 @@ const getNotes = async (userId) => {
             const notes = (result.rows._array || []).map(row => {
               let tags = [];
               
-              // Safely parse tags
               if (row.tags) {
                 try {
                   if (typeof row.tags === 'string') {
-                    // Remove any unexpected characters and parse
                     const cleanedTags = row.tags.replace(/[^\w\s",\[\]]/g, '');
                     tags = JSON.parse(cleanedTags);
                   } else if (Array.isArray(row.tags)) {
@@ -524,7 +667,6 @@ const getNoteById = async (noteId) => {
           const row = result.rows._array[0] || null;
           if (row) {
             let tags = [];
-            // Safely parse tags
             if (row.tags) {
               try {
                 if (typeof row.tags === 'string') {
@@ -586,25 +728,6 @@ const deleteNote = async (noteId) => {
   });
 };
 
-// Sync operations
-const addToSyncQueue = async (tableName, recordId, operation, data) => {
-  console.log('🔄 Sync queue added:', operation, recordId);
-  return Promise.resolve();
-};
-
-const getSyncQueue = async () => {
-  return Promise.resolve([]);
-};
-
-const removeFromSyncQueue = async (syncId) => {
-  return Promise.resolve();
-};
-
-const markNoteForSync = async (noteId, operation, data) => {
-  console.log('🔄 Marked for sync:', operation, noteId);
-  return Promise.resolve();
-};
-
 // Category operations
 const createCategoriesTable = async () => {
   return new Promise((resolve, reject) => {
@@ -643,7 +766,6 @@ const createCategoriesTable = async () => {
 // Initialize categories table when service loads
 createCategoriesTable();
 
-// Category CRUD operations
 const saveCategory = async (category) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -757,7 +879,6 @@ const deleteCategory = async (categoryId) => {
   });
 };
 
-// Update noteCount for categories
 const updateCategoryNoteCount = async (categoryId, noteCount) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -783,24 +904,76 @@ const updateCategoryNoteCount = async (categoryId, noteCount) => {
   });
 };
 
-// Export everything
+// ✅ Initialize sync queue table
+const createSyncQueueTable = async () => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      console.log('⚠️ Database not available');
+      resolve();
+      return;
+    }
+
+    db.transaction(tx => {
+      tx.executeSql(
+        `CREATE TABLE IF NOT EXISTS syncQueue (
+          id TEXT PRIMARY KEY,
+          tableName TEXT NOT NULL,
+          recordId TEXT NOT NULL,
+          operation TEXT NOT NULL,
+          data TEXT,
+          createdAt TEXT NOT NULL,
+          status TEXT DEFAULT 'pending'
+        )`,
+        [],
+        (tx, result) => {
+          console.log('🔄 Sync queue table ready');
+          resolve(result);
+        },
+        (tx, error) => {
+          console.log('⚠️ Could not create sync queue table:', error);
+          resolve();
+        }
+      );
+    });
+  });
+};
+
+// Initialize sync queue table when service loads
+createSyncQueueTable();
+
+// Export everything - WITH SYNC FUNCTIONS
 export default {
+  // User operations
   saveUser,
   getUser,
   getAllUsers,
+  
+  // Note operations
   saveNote,
   getNotes,
   getNoteById,
   deleteNote,
+  
+  // Sync operations
   addToSyncQueue,
   getSyncQueue,
   removeFromSyncQueue,
   markNoteForSync,
+  
+  // ✅ Profile picture sync functions
+  needsProfilePicSync,
+  markUserForProfilePicSync,
+  processProfilePicSync,
+  processPendingSyncQueue, // ✅ ADDED
+  
+  // Category operations
   saveCategory,
   getCategories,
   getCategoryById,
   deleteCategory,
   updateCategoryNoteCount,
+  
+  // Database info
   isInitialized: () => true,
   isRealSQLite: () => isRealSQLite
-}; 
+};

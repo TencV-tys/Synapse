@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { database } from '../config/firebase';
-import { ref, onValue, off, set } from 'firebase/database';
+import { ref, onValue, off, set, get } from 'firebase/database';
 
 const DirectMessagesScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -40,19 +40,27 @@ const DirectMessagesScreen = ({ navigation }) => {
             const usersArray = Object.entries(data)
               .map(([id, userData]) => ({
                 id,
-                // Ensure complete user profile data
+                uid: id,
+                // ✅ COMPLETE user data with profile picture
                 name: userData.name || userData.displayName || (userData.email ? userData.email.split('@')[0] : 'User'),
                 email: userData.email || 'No email',
-                profilePic: userData.profilePic || userData.photoURL || null,
+                profilePic: userData.profilePic || userData.photoURL || null, // ✅ PROFILE PICTURE
                 userType: userData.userType || 'student',
                 lastActive: userData.lastActive,
                 isOnline: userData.isOnline,
                 createdAt: userData.createdAt,
                 ...userData
               }))
-              .filter(u => u.id !== user?.uid); // Exclude current user
+              .filter(u => u.id !== user?.uid && u.uid !== user?.uid);
             
             console.log(`👥 Processed ${usersArray.length} users (excluding current user)`);
+            
+            // Log profile picture status for debugging
+            usersArray.forEach(u => {
+              console.log(`👤 ${u.name}: profilePic = ${u.profilePic ? '✅' : '❌'}`);
+              console.log(`📸 Profile pic URL: ${u.profilePic || 'NULL'}`);
+            });
+            
             setUsers(usersArray);
             setHasData(usersArray.length > 0);
           } else {
@@ -106,7 +114,7 @@ const DirectMessagesScreen = ({ navigation }) => {
                   lastMessage: lastMessage.text,
                   timestamp: lastMessage.timestamp,
                   unread: 0,
-                  lastMessageData: lastMessage // Store complete message data
+                  lastMessageData: lastMessage
                 });
               }
             }
@@ -156,7 +164,7 @@ const DirectMessagesScreen = ({ navigation }) => {
         id: targetUser.id,
         name: targetUser.name,
         email: targetUser.email,
-        profilePic: targetUser.profilePic,
+        profilePic: targetUser.profilePic, // ✅ PROFILE PICTURE INCLUDED
         userType: targetUser.userType
       }
     });
@@ -176,7 +184,7 @@ const DirectMessagesScreen = ({ navigation }) => {
             id: userData.id,
             name: freshUserData.name || freshUserData.displayName || (freshUserData.email ? freshUserData.email.split('@')[0] : 'User'),
             email: freshUserData.email || 'No email',
-            profilePic: freshUserData.profilePic || freshUserData.photoURL || null,
+            profilePic: freshUserData.profilePic || freshUserData.photoURL || null, // ✅ PROFILE PICTURE
             userType: freshUserData.userType || 'student',
             lastActive: freshUserData.lastActive,
             isOnline: freshUserData.isOnline,
@@ -196,41 +204,45 @@ const DirectMessagesScreen = ({ navigation }) => {
     }
   };
 
+  // ✅ FIXED: Demo users with profile pictures
   const createDemoUsers = async () => {
     try {
-      console.log('🎭 Creating demo users...');
+      console.log('🎭 Creating demo users with profile pictures...');
       
       const demoUsers = [
         {
           id: 'demo_teacher_1',
+          uid: 'demo_teacher_1',
           email: 'teacher.demo@synapse.com',
           name: 'Dr. Sarah Wilson',
           displayName: 'Dr. Sarah Wilson',
           userType: 'teacher',
-          profilePic: null,
+          profilePic: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face',
           lastActive: new Date().toISOString(),
           isOnline: true,
           createdAt: new Date().toISOString()
         },
         {
           id: 'demo_student_1',
+          uid: 'demo_student_1',
           email: 'student1.demo@synapse.com',
           name: 'Alex Johnson',
           displayName: 'Alex Johnson',
           userType: 'student',
-          profilePic: null,
-          lastActive: new Date(Date.now() - 15 * 60000).toISOString(), // 15 mins ago
+          profilePic: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          lastActive: new Date(Date.now() - 15 * 60000).toISOString(),
           isOnline: false,
           createdAt: new Date().toISOString()
         },
         {
           id: 'demo_student_2',
+          uid: 'demo_student_2',
           email: 'student2.demo@synapse.com',
           name: 'Maria Garcia',
           displayName: 'Maria Garcia',
           userType: 'student',
-          profilePic: null,
-          lastActive: new Date(Date.now() - 2 * 3600000).toISOString(), // 2 hours ago
+          profilePic: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&h=150&fit=crop&crop=face',
+          lastActive: new Date(Date.now() - 2 * 3600000).toISOString(),
           isOnline: false,
           createdAt: new Date().toISOString()
         }
@@ -241,9 +253,13 @@ const DirectMessagesScreen = ({ navigation }) => {
         const userRef = ref(database, `users/${demoUser.id}`);
         await set(userRef, demoUser);
         console.log(`✅ Created demo user: ${demoUser.name}`);
+        console.log(`🖼️ Profile pic: ${demoUser.profilePic ? '✅' : '❌'}`);
       }
 
-      Alert.alert('Demo Users Created', 'You can now test the messaging features with demo users!');
+      Alert.alert('Demo Users Created', 'Demo users with profile pictures have been created!');
+      
+      // Reload users
+      await loadUsers();
       
     } catch (error) {
       console.error('❌ Error creating demo users:', error);
@@ -261,7 +277,7 @@ const DirectMessagesScreen = ({ navigation }) => {
           id: userInfo.id,
           name: userInfo.name,
           email: userInfo.email,
-          profilePic: userInfo.profilePic,
+          profilePic: userInfo.profilePic, // ✅ PROFILE PICTURE
           userType: userInfo.userType
         }
       });
@@ -277,7 +293,7 @@ const DirectMessagesScreen = ({ navigation }) => {
               id: chat.otherUserId,
               name: userData.name || userData.displayName || (userData.email ? userData.email.split('@')[0] : 'User'),
               email: userData.email,
-              profilePic: userData.profilePic || userData.photoURL,
+              profilePic: userData.profilePic || userData.photoURL, // ✅ PROFILE PICTURE
               userType: userData.userType
             }
           });
@@ -323,6 +339,7 @@ const DirectMessagesScreen = ({ navigation }) => {
     return `${days}d ago`;
   };
 
+  // ✅ FIXED: Render user item with proper profile picture handling
   const renderUserItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.userItem}
@@ -331,7 +348,13 @@ const DirectMessagesScreen = ({ navigation }) => {
     >
       <View style={styles.avatarContainer}>
         {item.profilePic ? (
-          <Image source={{ uri: item.profilePic }} style={styles.userAvatar} />
+          <Image 
+            source={{ uri: item.profilePic }} 
+            style={styles.userAvatar}
+            onError={(error) => {
+              console.log('❌ Failed to load profile picture for:', item.name);
+            }}
+          />
         ) : (
           <View style={[styles.userAvatar, styles.avatarPlaceholder]}>
             <Text style={styles.avatarText}>
@@ -382,7 +405,13 @@ const DirectMessagesScreen = ({ navigation }) => {
       >
         <View style={styles.avatarContainer}>
           {userInfo.profilePic ? (
-            <Image source={{ uri: userInfo.profilePic }} style={styles.userAvatar} />
+            <Image 
+              source={{ uri: userInfo.profilePic }} 
+              style={styles.userAvatar}
+              onError={(error) => {
+                console.log('❌ Failed to load profile picture for:', userInfo.name);
+              }}
+            />
           ) : (
             <View style={[styles.userAvatar, styles.avatarPlaceholder]}>
               <Text style={styles.avatarText}>
@@ -527,7 +556,13 @@ const DirectMessagesScreen = ({ navigation }) => {
             {selectedUser && (
               <View style={styles.profileContent}>
                 {selectedUser.profilePic ? (
-                  <Image source={{ uri: selectedUser.profilePic }} style={styles.profileAvatar} />
+                  <Image 
+                    source={{ uri: selectedUser.profilePic }} 
+                    style={styles.profileAvatar}
+                    onError={(error) => {
+                      console.log('❌ Failed to load profile picture in modal');
+                    }}
+                  />
                 ) : (
                   <View style={[styles.profileAvatar, styles.avatarPlaceholder]}>
                     <Text style={styles.profileAvatarText}>
@@ -581,10 +616,9 @@ const DirectMessagesScreen = ({ navigation }) => {
     </View>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex: 1, 
     backgroundColor: '#f8fafc',
   },
   centerContainer: {

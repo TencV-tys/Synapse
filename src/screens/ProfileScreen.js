@@ -10,21 +10,26 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
-  Image
+  Image,
+  RefreshControl
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/authService';
 import sqliteService from '../services/sqliteService';
+import { database } from '../config/firebase';
+import { ref, set } from 'firebase/database';
 
 const ProfileScreen = ({ navigation }) => {
-  const { user, setUser } = useAuth();
+  const { user, setUser, isOnline, triggerSync } = useAuth();
   const [name, setName] = useState(user?.name || '');
   const [profilePic, setProfilePic] = useState(user?.profilePic || null);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [imageModalVisible, setImageModalVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
 
   // Request permissions on component mount
   useEffect(() => {
@@ -60,6 +65,23 @@ const ProfileScreen = ({ navigation }) => {
     }
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // Check for pending sync
+      const syncItems = await sqliteService.getSyncQueue();
+      if (syncItems.length > 0 && isOnline) {
+        setSyncStatus(`🔄 ${syncItems.length} pending sync items`);
+      } else {
+        setSyncStatus(syncItems.length > 0 ? '📴 Sync pending (offline)' : '✅ Synced');
+      }
+    } catch (error) {
+      console.error('❌ Error checking sync status:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const pickImage = async () => {
     try {
       console.log('🖼️ Launching image picker...');
@@ -79,7 +101,6 @@ const ProfileScreen = ({ navigation }) => {
         const imageAsset = result.assets[0];
         console.log('✅ Image selected:', imageAsset.uri);
         
-        // Directly set the image URI - React Native Image can handle file:// URIs
         setUploading(true);
         setProfilePic(imageAsset.uri);
         console.log('🖼️ Profile picture set to local URI');
@@ -112,7 +133,6 @@ const ProfileScreen = ({ navigation }) => {
         const imageAsset = result.assets[0];
         console.log('✅ Photo taken:', imageAsset.uri);
         
-        // Directly set the image URI
         setUploading(true);
         setProfilePic(imageAsset.uri);
         console.log('🖼️ Profile picture set from camera');
@@ -143,49 +163,86 @@ const ProfileScreen = ({ navigation }) => {
     setLoading(true);
     try {
       let finalProfilePic = profilePic;
+      let needsSync = false;
       
       console.log('💾 Saving profile...');
-      console.log('📸 Current profile pic:', profilePic);
+      console.log('🖼️ Current profile pic:', profilePic);
+      console.log('🌐 Online status:', isOnline);
       
-      // If it's a local file URI, upload it to Firebase Storage first
+      // ✅ SMART PROFILE PICTURE HANDLING
       if (profilePic && profilePic.startsWith('file://')) {
-        try {
-          console.log('☁️ Uploading profile picture to Firebase...');
-          setUploading(true);
-          const downloadURL = await authService.uploadProfilePicture(profilePic, user.uid);
-          finalProfilePic = downloadURL;
-          console.log('✅ Profile picture uploaded:', downloadURL);
-          setUploading(false);
-        } catch (uploadError) {
-          console.log('⚠️ Could not upload profile picture, keeping local URI:', uploadError.message);
-          // Keep local URI as fallback - React Native Image can handle file:// URIs
+        if (isOnline) {
+          try {
+            console.log('☁️ Uploading profile picture to Firebase Storage...');
+            setUploading(true);
+            
+            // Upload to Firebase Storage and get download URL
+            const downloadURL = await authService.uploadProfilePicture(profilePic, user.uid);
+            finalProfilePic = downloadURL;
+            
+            console.log('✅ Profile picture uploaded to Firebase Storage:', downloadURL);
+            console.log('📸 New profile pic URL:', finalProfilePic);
+            
+            setUploading(false);
+          } catch (uploadError) {
+            console.error('❌ Error uploading profile picture:', uploadError);
+            // Keep local URI and mark for sync
+            finalProfilePic = profilePic;
+            needsSync = true;
+            console.log('🔄 Upload failed, marking for sync');
+          }
+        } else {
+          // Offline mode - keep local URI
+          console.log('📴 Offline mode - keeping local profile picture URI');
           finalProfilePic = profilePic;
+          needsSync = true;
         }
+      } else if (!profilePic) {
+        // If removing profile picture, set to null
+        finalProfilePic = null;
       }
+      // If profilePic is already a URL (not file://), keep it as is
 
-      // ✅ Create updated user object WITH profile picture
+      // ✅ COMPLETE user object with ALL fields including profile picture
       const updatedUser = {
-        ...user,
+        uid: user.uid,
+        email: user.email,
         name: name.trim(),
-        profilePic: finalProfilePic, // ✅ Make sure this is included
+        profilePic: finalProfilePic,
+        userType: user.userType || 'student',
+        password: user.password || '',
+        createdAt: user.createdAt || new Date().toISOString(),
+        lastLogin: user.lastLogin || new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        isOnline: isOnline,
+        isOffline: !isOnline,
         updatedAt: new Date().toISOString()
       };
 
-      console.log('💾 Saving user to SQLite...');
-      console.log('📸 Profile pic in user object:', updatedUser.profilePic ? 'YES' : 'NO');
+      console.log('💾 Saving user data...');
+      console.log('📸 Final profile pic URL:', updatedUser.profilePic);
+      console.log('🔄 Needs sync:', needsSync);
       
-      // ✅ ALWAYS save to SQLite (local database)
+      // ✅ Save to SQLite FIRST (always)
       await sqliteService.saveUser(updatedUser);
-      console.log('💾 Profile saved to SQLite');
+      console.log('💾✅ Profile saved to SQLite');
 
-      // ✅ ALSO save to Firebase if user is online
-      if (!user?.isOffline) {
+      // ✅ Mark for sync if needed
+      if (needsSync && isOnline) {
+        console.log('🔄 Marking profile picture for sync...');
+        await sqliteService.markUserForProfilePicSync(updatedUser);
+      }
+
+      // ✅ Save to Firebase Realtime Database if online
+      if (isOnline) {
         try {
-          console.log('🔥 Saving user to Firebase...');
-          await authService.updateUserProfile(updatedUser);
-          console.log('🔥 Profile saved to Firebase');
+          console.log('🔥 Saving user to Firebase Realtime Database...');
+          const userRef = ref(database, `users/${user.uid}`);
+          await set(userRef, updatedUser);
+          console.log('🔥✅ Profile saved to Firebase Realtime Database');
         } catch (firebaseError) {
-          console.log('⚠️ Firebase save failed, but SQLite saved:', firebaseError.message);
+          console.error('❌ Firebase save failed:', firebaseError);
+          // Don't alert here - SQLite saved successfully
         }
       }
 
@@ -193,8 +250,19 @@ const ProfileScreen = ({ navigation }) => {
       setUser(updatedUser);
       
       setIsEditing(false);
-      console.log('✅ Profile update completed');
-      Alert.alert('Success', 'Profile updated successfully!');
+      console.log('✅ Profile update completed successfully');
+      
+      // Show appropriate message
+      if (needsSync) {
+        Alert.alert(
+          'Success', 
+          'Profile updated! Profile picture will sync when possible.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Success', 'Profile updated successfully!');
+      }
+      
     } catch (error) {
       console.error('❌ Error updating profile:', error);
       Alert.alert('Error', 'Failed to update profile. Please try again.');
@@ -211,16 +279,109 @@ const ProfileScreen = ({ navigation }) => {
     setIsEditing(false);
   };
 
+  const handleManualSync = async () => {
+    if (!isOnline) {
+      Alert.alert('Offline', 'Cannot sync while offline. Please check your internet connection.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await triggerSync();
+      if (result.success) {
+        Alert.alert('Success', `Sync completed! Processed ${result.result.processed} items.`);
+      } else {
+        Alert.alert('Sync Failed', result.error);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to sync: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fixExistingUserData = async () => {
+    try {
+      console.log('🔧 Fixing existing user data structure...');
+      
+      // Get current user data from SQLite first
+      const currentUserData = await sqliteService.getUser(user.uid);
+      console.log('📊 Current SQLite user data:', currentUserData);
+      
+      // Create COMPLETE user object with all required fields
+      const completeUser = {
+        uid: user.uid,
+        email: user.email,
+        name: user.name || currentUserData?.name || 'User',
+        profilePic: user.profilePic || currentUserData?.profilePic || null,
+        userType: user.userType || currentUserData?.userType || 'student',
+        password: user.password || currentUserData?.password || '',
+        createdAt: user.createdAt || currentUserData?.createdAt || new Date().toISOString(),
+        lastLogin: user.lastLogin || currentUserData?.lastLogin || new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        isOnline: isOnline,
+        isOffline: !isOnline,
+        updatedAt: new Date().toISOString()
+      };
+
+      console.log('📊 Fixed user data to save:', completeUser);
+      
+      // ✅ Save COMPLETE user object to SQLite FIRST
+      await sqliteService.saveUser(completeUser);
+      console.log('💾✅ User data fixed in SQLite!');
+      
+      // ✅ Save COMPLETE user object to Firebase if online
+      if (isOnline) {
+        const userRef = ref(database, `users/${user.uid}`);
+        await set(userRef, completeUser);
+        console.log('🔥✅ User data fixed in Firebase!');
+      }
+      
+      console.log('✅ User data structure fixed!');
+      Alert.alert('Success', 'User data structure has been fixed!');
+      
+      // ✅ Update local state immediately
+      setUser(completeUser);
+      setProfilePic(completeUser.profilePic);
+      
+    } catch (error) {
+      console.error('❌ Error fixing user data:', error);
+      Alert.alert('Error', 'Failed to fix user data structure: ' + error.message);
+    }
+  };
+
+  // Check sync status on component mount
+  useEffect(() => {
+    const checkSyncStatus = async () => {
+      try {
+        const syncItems = await sqliteService.getSyncQueue();
+        if (syncItems.length > 0) {
+          setSyncStatus(isOnline ? `🔄 ${syncItems.length} pending` : '📴 Sync pending');
+        } else {
+          setSyncStatus('✅ Synced');
+        }
+      } catch (error) {
+        console.error('❌ Error checking sync status:', error);
+      }
+    };
+
+    checkSyncStatus();
+  }, [isOnline]);
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Profile Settings</Text>
+        <Text style={styles.syncStatus}>{syncStatus}</Text>
       </View>
 
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollViewContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
         <View style={styles.profileSection}>
           {/* Profile Picture Section */}
@@ -243,7 +404,6 @@ const ProfileScreen = ({ navigation }) => {
                     onError={(error) => {
                       console.log('❌ Failed to load profile picture:', error.nativeEvent.error);
                       console.log('📸 Attempted to load:', profilePic);
-                      // Fallback to default avatar if image fails to load
                       Alert.alert('Error', 'Failed to load profile picture. Please try selecting a different image.');
                     }}
                     resizeMode="cover"
@@ -269,7 +429,7 @@ const ProfileScreen = ({ navigation }) => {
               {user?.userType === 'student' ? 'Student' : 
                user?.userType === 'teacher' ? 'Teacher' : 
                user?.userType === 'creative' ? 'Creative' : 'User'}
-              {user?.isOffline && ' • Offline Mode'}
+              {!isOnline && ' • Offline Mode'}
             </Text>
             
             {isEditing && (
@@ -280,6 +440,28 @@ const ProfileScreen = ({ navigation }) => {
                 <Text style={styles.changePhotoText}>
                   {profilePic ? 'Change Photo' : 'Add Photo'}
                 </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Sync and Fix Buttons */}
+          <View style={styles.actionButtons}>
+            {!isEditing && isOnline && (
+              <TouchableOpacity 
+                style={styles.syncButton}
+                onPress={handleManualSync}
+                disabled={loading}
+              >
+                <Text style={styles.syncButtonText}>🔄 Sync Now</Text>
+              </TouchableOpacity>
+            )}
+            
+            {!isEditing && (
+              <TouchableOpacity 
+                style={styles.fixButton}
+                onPress={fixExistingUserData}
+              >
+                <Text style={styles.fixButtonText}>🔧 Fix User Data</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -354,8 +536,13 @@ const ProfileScreen = ({ navigation }) => {
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>Status</Text>
               <Text style={styles.infoValue}>
-                {user?.isOffline ? 'Offline Account' : 'Online Account'}
+                {isOnline ? 'Online' : 'Offline'}
               </Text>
+            </View>
+
+            <View style={styles.infoItem}>
+              <Text style={styles.infoLabel}>Sync Status</Text>
+              <Text style={styles.infoValue}>{syncStatus}</Text>
             </View>
           </View>
         </View>
@@ -426,12 +613,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#6366f1',
     padding: 20,
     paddingTop: 60,
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
     textAlign: 'center',
+  },
+  syncStatus: {
+    fontSize: 12,
+    color: '#e0e7ff',
+    marginTop: 5,
   },
   scrollView: {
     flex: 1,
@@ -441,11 +634,11 @@ const styles = StyleSheet.create({
   },
   profileSection: {
     padding: 20,
-    paddingBottom: 40, // Extra padding at bottom
+    paddingBottom: 40,
   },
   avatarContainer: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 20,
   },
   avatarWrapper: {
     position: 'relative',
@@ -517,6 +710,38 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   changePhotoText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
+  syncButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#10b981',
+    borderRadius: 8,
+    alignItems: 'center',
+    flex: 1,
+  },
+  syncButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fixButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#8b5cf6',
+    borderRadius: 8,
+    alignItems: 'center',
+    flex: 1,
+  },
+  fixButtonText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',

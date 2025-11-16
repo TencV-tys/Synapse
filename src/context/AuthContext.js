@@ -14,113 +14,140 @@ export const AuthProvider = ({ children }) => {
   const [authLoading, setAuthLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
 
-  // Check online status
+  // Check online status and trigger sync when coming online
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
+    const unsubscribe = NetInfo.addEventListener(async state => {
       const online = state.isConnected && state.isInternetReachable;
       console.log(online ? '🌐 App is online' : '📴 App is offline');
+      
+      // If we just came online and have a user, process sync queue
+      if (online && !isOnline && user) {
+        console.log('🔄 App came online, processing sync queue...');
+        try {
+          const syncResult = await sqliteService.processPendingSyncQueue(
+            authService.uploadProfilePicture.bind(authService)
+          );
+          console.log('🔄 Sync queue processed:', syncResult);
+        } catch (syncError) {
+          console.error('❌ Error processing sync queue:', syncError);
+        }
+      }
+      
       setIsOnline(online);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [isOnline, user]);
 
-  // In your AuthContext.js - improve the auth state handling
-useEffect(() => {
-  console.log('🔄 AuthContext: Checking authentication state...');
-  
-  const checkAuthState = async () => {
-    try {
-      setLoading(true);
-      
-      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-        console.log('🔥 Firebase auth state:', firebaseUser ? `User ${firebaseUser.email}` : 'No user');
+  // Auth state listener
+  useEffect(() => {
+    console.log('🔄 AuthContext: Checking authentication state...');
+    
+    const checkAuthState = async () => {
+      try {
+        setLoading(true);
         
-        if (firebaseUser) {
-          try {
-            const userData = await authService.getCurrentUser(firebaseUser.uid);
-            const mergedUser = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email,
-              emailVerified: firebaseUser.emailVerified,
-              displayName: firebaseUser.displayName,
-              ...userData
-            };
-            setUser(mergedUser);
-            console.log('✅ User loaded from Firebase');
-          } catch (error) {
-            console.error('❌ Error loading Firebase user:', error);
-            // Create basic user from Firebase auth
-            const basicUser = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email,
-              emailVerified: firebaseUser.emailVerified,
-              displayName: firebaseUser.displayName,
-              name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
-              userType: 'student',
-              lastLogin: new Date().toISOString()
-            };
-            setUser(basicUser);
-            console.log('✅ Using basic Firebase user data');
+        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+          console.log('🔥 Firebase auth state:', firebaseUser ? `User ${firebaseUser.email}` : 'No user');
+          
+          if (firebaseUser) {
+            try {
+              const userData = await authService.getCurrentUser(firebaseUser.uid);
+              const mergedUser = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                emailVerified: firebaseUser.emailVerified,
+                displayName: firebaseUser.displayName,
+                ...userData
+              };
+              
+              // ✅ Check if user needs profile picture sync
+              if (sqliteService.needsProfilePicSync(mergedUser)) {
+                console.log('🔄 User needs profile picture sync, adding to queue...');
+                await sqliteService.markUserForProfilePicSync(mergedUser);
+                
+                // Process sync queue immediately if online
+                if (isOnline) {
+                  console.log('🔄 Processing sync queue on login...');
+                  await sqliteService.processPendingSyncQueue(
+                    authService.uploadProfilePicture.bind(authService)
+                  );
+                }
+              }
+              
+              setUser(mergedUser);
+              console.log('✅ User loaded from Firebase');
+            } catch (error) {
+              console.error('❌ Error loading Firebase user:', error);
+              // Create basic user from Firebase auth
+              const basicUser = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                emailVerified: firebaseUser.emailVerified,
+                displayName: firebaseUser.displayName,
+                name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
+                userType: 'student',
+                lastLogin: new Date().toISOString()
+              };
+              setUser(basicUser);
+              console.log('✅ Using basic Firebase user data');
+            }
+          } else {
+            // No Firebase user, check SQLite for offline access
+            await checkSQLiteForUser();
           }
-        } else {
-          // No Firebase user, check SQLite for offline access
-          await checkSQLiteForUser();
-        }
-        
+          
+          setLoading(false);
+        });
+
+        return unsubscribe;
+      } catch (error) {
+        console.error('❌ Error checking auth state:', error);
         setLoading(false);
-      });
-
-      return unsubscribe;
-    } catch (error) {
-      console.error('❌ Error checking auth state:', error);
-      setLoading(false);
-      setUser(null);
-    }
-  };
-
-  const checkSQLiteForUser = async (email = null) => {
-    try {
-      console.log('📱 Checking SQLite for users...');
-      const offlineUsers = await sqliteService.getAllUsers();
-      
-      if (offlineUsers.length > 0) {
-        let userToUse = offlineUsers[0];
-        
-        if (email) {
-          userToUse = offlineUsers.find(u => u.email === email) || offlineUsers[0];
-        }
-        
-        console.log('✅ Using user from SQLite:', userToUse.email);
-        setUser(userToUse);
-      } else {
-        console.log('❌ No users found in SQLite');
         setUser(null);
       }
-    } catch (error) {
-      console.error('❌ Error checking SQLite:', error);
-      setUser(null);
-    }
-  };
+    };
 
-  const unsubscribe = checkAuthState();
-  
-  const timeout = setTimeout(() => {
-    if (loading) {
-      console.log('⏰ Auth check timeout - forcing completion');
-      setLoading(false);
-    }
-  }, 5000);
+    const checkSQLiteForUser = async (email = null) => {
+      try {
+        console.log('📱 Checking SQLite for users...');
+        const offlineUsers = await sqliteService.getAllUsers();
+        
+        if (offlineUsers.length > 0) {
+          let userToUse = offlineUsers[0];
+          
+          if (email) {
+            userToUse = offlineUsers.find(u => u.email === email) || offlineUsers[0];
+          }
+          
+          console.log('✅ Using user from SQLite:', userToUse.email);
+          setUser(userToUse);
+        } else {
+          console.log('❌ No users found in SQLite');
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('❌ Error checking SQLite:', error);
+        setUser(null);
+      }
+    };
 
-  return () => {
-    if (unsubscribe && typeof unsubscribe === 'function') {
-      unsubscribe();
-    }
-    clearTimeout(timeout);
-  };
-},[]);
+    const unsubscribe = checkAuthState();
+    
+    const timeout = setTimeout(() => {
+      if (loading) {
+        console.log('⏰ Auth check timeout - forcing completion');
+        setLoading(false);
+      }
+    }, 5000);
 
-
+    return () => {
+      if (unsubscribe && typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+      clearTimeout(timeout);
+    };
+  }, [isOnline]);
 
   // Migrate offline user to Firebase - AUTOMATIC ACCOUNT CREATION
   const migrateOfflineUserToOnline = async (email, password) => {
@@ -143,6 +170,13 @@ useEffect(() => {
       
       console.log('✅ Firebase account created:', firebaseUser.email);
       
+      // Handle profile picture sync if user has local profile pic
+      let finalProfilePic = offlineUser.profilePic;
+      if (offlineUser.profilePic && offlineUser.profilePic.startsWith('file://')) {
+        console.log('🔄 Offline user has local profile picture, marking for sync...');
+        // We'll mark for sync rather than upload immediately
+      }
+      
       // Create user profile in Firestore 
       const userProfile = {
         uid: firebaseUser.uid,
@@ -150,6 +184,7 @@ useEffect(() => {
         name: offlineUser.name || email.split('@')[0],
         userType: offlineUser.userType || 'student',
         password: password, // Store password for consistency
+        profilePic: finalProfilePic,
         createdAt: offlineUser.createdAt || new Date().toISOString(),
         lastLogin: new Date().toISOString(),
         isOffline: false
@@ -168,6 +203,12 @@ useEffect(() => {
       
       await sqliteService.saveUser(updatedUser);
       console.log('✅ SQLite user updated with Firebase UID');
+      
+      // Mark for profile picture sync if needed
+      if (sqliteService.needsProfilePicSync(updatedUser)) {
+        console.log('🔄 Marking migrated user for profile picture sync...');
+        await sqliteService.markUserForProfilePicSync(updatedUser);
+      }
       
       return updatedUser;
     } catch (error) {
@@ -200,6 +241,18 @@ useEffect(() => {
           // Try to login with Firebase first
           userData = await authService.login(email, password);
           console.log('✅ Firebase login successful');
+          
+          // ✅ Check if user needs profile picture sync
+          if (sqliteService.needsProfilePicSync(userData)) {
+            console.log('🔄 User needs profile picture sync, adding to queue...');
+            await sqliteService.markUserForProfilePicSync(userData);
+            
+            // Process sync queue immediately
+            console.log('🔄 Processing sync queue on login...');
+            await sqliteService.processPendingSyncQueue(
+              authService.uploadProfilePicture.bind(authService)
+            );
+          }
           
         } catch (firebaseError) {
           console.log('🔥 Firebase authentication failed:', firebaseError.message);
@@ -307,6 +360,26 @@ useEffect(() => {
     }
   };
 
+  // ✅ ADD THIS: Manual sync trigger
+  const triggerSync = async () => {
+    if (!isOnline || !user) {
+      console.log('❌ Cannot sync: offline or no user');
+      return { success: false, error: 'Cannot sync while offline' };
+    }
+    
+    try {
+      console.log('🔄 Manual sync triggered...');
+      const result = await sqliteService.processPendingSyncQueue(
+        authService.uploadProfilePicture.bind(authService)
+      );
+      console.log('✅ Manual sync completed:', result);
+      return { success: true, result };
+    } catch (error) {
+      console.error('❌ Manual sync failed:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
   const value = {
     user,
     setUser,
@@ -315,7 +388,8 @@ useEffect(() => {
     logout,
     loading,
     authLoading,
-    isOnline
+    isOnline,
+    triggerSync // ✅ ADD THIS
   };
 
   return (

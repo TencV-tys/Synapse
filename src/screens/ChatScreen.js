@@ -183,17 +183,17 @@ const ChatScreen = ({ route, navigation }) => {
       const chatRef = getActiveChatRef();
       const newMessageRef = push(chatRef);
       
-     const messageData = {
-  text: messageText,
-  userId: user.uid,
-  userName: user.name || user.displayName || user.email.split('@')[0],
-  userEmail: user.email,
-  userProfilePic: user.photoURL || user.profilePic || null, // Ensure null if undefined
-  userType: user.userType || 'student',
-  timestamp: serverTimestamp(),
-  chatType: activeChat === 'public' ? 'public' : 'private',
-  recipientId: activeChat !== 'public' ? activeChat : null
-};
+      const messageData = {
+        text: messageText,
+        userId: user.uid,
+        userName: user.name || user.displayName || user.email.split('@')[0],
+        userEmail: user.email,
+        userProfilePic: user.profilePic || null,
+        userType: user.userType || 'student',
+        timestamp: serverTimestamp(),
+        chatType: activeChat === 'public' ? 'public' : 'private',
+        recipientId: activeChat !== 'public' ? activeChat : null
+      };
        
       await set(newMessageRef, messageData);
       setNewMessage('');
@@ -254,12 +254,10 @@ const ChatScreen = ({ route, navigation }) => {
     setSelectedMessage(null);
   };
 
-  // FIXED: Manual clipboard without package
   const handleCopyText = async () => {
     if (!selectedMessage) return;
     
     try {
-      // Simple manual copy - show text in alert
       Alert.alert(
         'Copy Text',
         selectedMessage.text,
@@ -271,7 +269,6 @@ const ChatScreen = ({ route, navigation }) => {
           {
             text: 'Select All',
             onPress: () => {
-              // This helps users manually select and copy the text
               console.log('📋 Text ready for manual copy:', selectedMessage.text);
             }
           }
@@ -378,20 +375,16 @@ const ChatScreen = ({ route, navigation }) => {
     setShowChatSelector(false);
   };
 
-  // FIXED: Profile click handler - get complete user data
   const showProfile = async (messageUserData) => {
     try {
       console.log('👤 Showing profile for:', messageUserData);
       
-      // Try to find the complete user data from the users list first
       let completeUserData = users.find(u => u.id === messageUserData.userId);
       
       if (!completeUserData) {
-        // If not found in current users list, try to get from Firebase
         console.log('🔍 User not in current list, fetching from Firebase...');
         const userRef = ref(database, `users/${messageUserData.userId}`);
         
-        // Create a one-time listener to get user data
         onValue(userRef, (snapshot) => {
           const userData = snapshot.val();
           if (userData) {
@@ -408,13 +401,11 @@ const ChatScreen = ({ route, navigation }) => {
           }
         }, { onlyOnce: true });
       } else {
-        // Use the complete user data we already have
         setSelectedUser(completeUserData);
         setShowUserProfile(true);
       }
     } catch (error) {
       console.error('❌ Error loading user profile:', error);
-      // Fallback: Use the basic data from the message
       setSelectedUser({
         id: messageUserData.userId,
         name: messageUserData.userName,
@@ -461,52 +452,58 @@ const ChatScreen = ({ route, navigation }) => {
     }
   };
 
-  // FIXED: Safe user name display
   const getUserDisplayName = (userData) => {
     if (!userData) return 'Unknown User';
     return userData.name || userData.userName || (userData.email ? userData.email.split('@')[0] : 'User');
   };
 
-  // FIXED: Safe email display
   const getUserEmail = (userData) => {
     if (!userData) return 'No email';
     return userData.email || userData.userEmail || 'No email available';
   };
-// In ChatScreen.js, replace the renderMessage function with this:
 
-const renderMessage = ({ item, index }) => {
-  const isCurrentUser = item.userId === user?.uid;
-  const showHeader = index === 0 || item.userId !== messages[index - 1]?.userId;
+  // ✅ FIXED: Profile picture shows for BOTH users in messages with TIMESTAMP AT BOTTOM
+  const renderMessage = ({ item, index }) => {
+    const isCurrentUser = item.userId === user?.uid;
 
-  return (
-    <TouchableOpacity 
-      style={[
-        styles.messageContainer,
-        isCurrentUser ? styles.currentUserMessage : styles.otherUserMessage
-      ]}
-      onLongPress={() => handleMessageLongPress(item)}
-      delayLongPress={500}
-      activeOpacity={0.7}
-    >
-      {/* Show header for OTHER users' messages only */}
-      {!isCurrentUser && showHeader && (
-        <TouchableOpacity 
-          style={styles.messageHeader}
-          onPress={() => showProfile(item)}
-          activeOpacity={0.7}
-        >
-          {item.userProfilePic ? (
-            <Image source={{ uri: item.userProfilePic }} style={styles.messageAvatar} />
-          ) : (
-            <View style={[styles.messageAvatar, styles.avatarPlaceholder]}>
-              <Text style={styles.avatarText}>
-                {getUserDisplayName(item).charAt(0).toUpperCase()}
-              </Text>
-            </View>
-          )}
-          <View style={styles.userInfo}>
-            <Text style={styles.userName}>{getUserDisplayName(item)}</Text>
-            <View style={styles.roleContainer}>
+    return (
+      <TouchableOpacity 
+        style={[
+          styles.messageContainer,
+          isCurrentUser ? styles.currentUserMessage : styles.otherUserMessage
+        ]}
+        onLongPress={() => handleMessageLongPress(item)}
+        delayLongPress={500}
+        activeOpacity={0.7}
+      >
+        {/* PROFILE PICTURE FOR OTHER USERS */}
+        {!isCurrentUser && (
+          <TouchableOpacity 
+            style={styles.avatarContainer}
+            onPress={() => showProfile(item)}
+            activeOpacity={0.7}
+          >
+            {item.userProfilePic ? (
+              <Image 
+                source={{ uri: item.userProfilePic }} 
+                style={styles.messageAvatar}
+                onError={(error) => console.log('❌ Failed to load profile picture in message')}
+              />
+            ) : (
+              <View style={[styles.messageAvatar, styles.avatarPlaceholder]}>
+                <Text style={styles.avatarText}>
+                  {getUserDisplayName(item).charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+        
+        <View style={styles.messageContent}>
+          {/* User info for other users' messages */}
+          {!isCurrentUser && (
+            <View style={styles.userInfo}>
+              <Text style={styles.userName}>{getUserDisplayName(item)}</Text>
               <View 
                 style={[
                   styles.roleBadge, 
@@ -518,37 +515,68 @@ const renderMessage = ({ item, index }) => {
                 </Text>
               </View>
             </View>
+          )}
+          
+          {/* Message bubble with timestamp at bottom */}
+          <View style={[
+            styles.messageBubble,
+            isCurrentUser ? styles.currentUserBubble : styles.otherUserBubble
+          ]}>
+            <Text style={[
+              styles.messageText,
+              isCurrentUser ? styles.currentUserText : styles.otherUserText
+            ]}>
+              {item.text}
+            </Text>
+            
+            {/* ✅ FIXED: TIMESTAMP AT BOTTOM OF MESSAGE BUBBLE */}
+            <View style={[
+              styles.messageFooter,
+              isCurrentUser ? styles.currentUserFooter : styles.otherUserFooter
+            ]}>
+              <Text style={styles.timeText}>{formatTime(item.timestamp)}</Text>
+              {item.isEdited && (
+                <Text style={styles.editedText}>(edited)</Text>
+              )}
+              {isCurrentUser && (
+                <Text style={styles.statusIcon}>✓</Text>
+              )}
+            </View>
           </View>
-        </TouchableOpacity>
-      )}
-      
-      <View style={[
-        styles.messageBubble,
-        isCurrentUser ? styles.currentUserBubble : styles.otherUserBubble
-      ]}>
-        <Text style={[
-          styles.messageText,
-          isCurrentUser ? styles.currentUserText : styles.otherUserText
-        ]}>
-          {item.text}
-        </Text>
-      </View>
-      
-      <View style={[
-        styles.messageFooter,
-        isCurrentUser ? styles.currentUserFooter : styles.otherUserFooter
-      ]}>
-        <Text style={styles.timeText}>{formatTime(item.timestamp)}</Text>
-        {item.isEdited && (
-          <Text style={styles.editedText}>(edited)</Text>
-        )}
+        </View>
+
+        {/* PROFILE PICTURE FOR CURRENT USER (on the right side) */}
         {isCurrentUser && (
-          <Text style={styles.statusIcon}>✓</Text>
+          <TouchableOpacity 
+            style={styles.avatarContainer}
+            onPress={() => showProfile({
+              userId: user.uid,
+              userName: user.name,
+              userEmail: user.email,
+              userProfilePic: user.profilePic,
+              userType: user.userType
+            })}
+            activeOpacity={0.7}
+          >
+            {user.profilePic ? (
+              <Image 
+                source={{ uri: user.profilePic }} 
+                style={styles.messageAvatar}
+                onError={(error) => console.log('❌ Failed to load current user profile picture')}
+              />
+            ) : (
+              <View style={[styles.messageAvatar, styles.avatarPlaceholder]}>
+                <Text style={styles.avatarText}>
+                  {getUserDisplayName(user).charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
         )}
-      </View>
-    </TouchableOpacity>
-  );
-};
+      </TouchableOpacity>
+    );
+  };
+
   const renderUserItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.userItem}
@@ -560,7 +588,11 @@ const renderMessage = ({ item, index }) => {
       activeOpacity={0.7}
     >
       {item.profilePic ? (
-        <Image source={{ uri: item.profilePic }} style={styles.userAvatar} />
+        <Image 
+          source={{ uri: item.profilePic }} 
+          style={styles.userAvatar}
+          onError={(error) => console.log('❌ Failed to load user profile picture')}
+        />
       ) : (
         <View style={[styles.userAvatar, styles.avatarPlaceholder]}>
           <Text style={styles.avatarText}>
@@ -662,7 +694,7 @@ const renderMessage = ({ item, index }) => {
         }
       />
 
-      {/* Message Input with Keyboard Handling */}
+      {/* Message Input */}
       <View style={[styles.inputContainer, { marginBottom: keyboardHeight }]}>
         <TextInput
           style={[
@@ -697,7 +729,7 @@ const renderMessage = ({ item, index }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Chat Selector Modal - Only show in public chat mode */}
+      {/* Chat Selector Modal */}
       {!directMessage && (
         <Modal
           visible={showChatSelector}
@@ -714,7 +746,6 @@ const renderMessage = ({ item, index }) => {
                 </TouchableOpacity>
               </View>
               
-              {/* Public Chat Option */}
               <TouchableOpacity 
                 style={styles.chatOption}
                 onPress={() => {
@@ -734,7 +765,6 @@ const renderMessage = ({ item, index }) => {
                 </View>
               </TouchableOpacity>
 
-              {/* Online Users */}
               <Text style={styles.sectionTitle}>Online Users ({users.length})</Text>
               <FlatList
                 data={users}
@@ -770,7 +800,11 @@ const renderMessage = ({ item, index }) => {
             {selectedUser && (
               <View style={styles.profileContent}>
                 {selectedUser.profilePic ? (
-                  <Image source={{ uri: selectedUser.profilePic }} style={styles.profileAvatar} />
+                  <Image 
+                    source={{ uri: selectedUser.profilePic }} 
+                    style={styles.profileAvatar}
+                    onError={(error) => console.log('❌ Failed to load profile picture in modal')}
+                  />
                 ) : (
                   <View style={[styles.profileAvatar, styles.avatarPlaceholder]}>
                     <Text style={styles.profileAvatarText}>
@@ -796,7 +830,10 @@ const renderMessage = ({ item, index }) => {
                 </View>
 
                 <View style={styles.profileStatus}>
-                  <View style={[styles.statusIndicator, selectedUser.isOnline ? styles.statusOnline : styles.statusOffline]} />
+                  <View style={[
+                    styles.statusIndicator, 
+                    selectedUser.isOnline ? styles.statusOnline : styles.statusOffline
+                  ]} />
                   <Text style={styles.profileStatusText}>
                     {selectedUser.isOnline ? 'Online' : 'Offline'}
                   </Text>
@@ -914,6 +951,7 @@ const renderMessage = ({ item, index }) => {
     </View>
   );
 };
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1007,26 +1045,29 @@ const styles = StyleSheet.create({
     padding: 15,
     paddingBottom: 10,
   },
+  // Message container with profile picture for every message
   messageContainer: {
+    flexDirection: 'row',
     marginBottom: 15,
-  },
-  currentUserMessage: {
-    alignItems: 'flex-end',
-  },
-  otherUserMessage: {
     alignItems: 'flex-start',
   },
-  messageHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    marginLeft: 10,
+  currentUserMessage: {
+    justifyContent: 'flex-end',
+  },
+  otherUserMessage: {
+    justifyContent: 'flex-start',
+  },
+  avatarContainer: {
+    marginRight: 8,
   },
   messageAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  avatarSpacer: {
+    width: 36,
+    marginLeft: 8,
   },
   avatarPlaceholder: {
     backgroundColor: '#6366f1',
@@ -1038,19 +1079,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
+  messageContent: {
+    flex: 1,
+    maxWidth: '80%',
+  },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 4,
+    marginLeft: 8,
   },
   userName: {
     fontSize: 12,
     fontWeight: '600',
     color: '#475569',
     marginRight: 6,
-  },
-  roleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   roleBadge: {
     paddingHorizontal: 6,
@@ -1063,7 +1106,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   messageBubble: {
-    maxWidth: '80%',
     padding: 12,
     borderRadius: 18,
     marginBottom: 4,
@@ -1071,6 +1113,7 @@ const styles = StyleSheet.create({
   currentUserBubble: {
     backgroundColor: '#6366f1',
     borderBottomRightRadius: 4,
+    alignSelf: 'flex-end',
   },
   otherUserBubble: {
     backgroundColor: '#fff',
@@ -1080,6 +1123,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    alignSelf: 'flex-start',
   },
   messageText: {
     fontSize: 16,
@@ -1091,17 +1135,18 @@ const styles = StyleSheet.create({
   otherUserText: {
     color: '#334155',
   },
+  // ✅ FIXED: Message footer at bottom of bubble
   messageFooter: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 4,
+    justifyContent: 'flex-end',
   },
   currentUserFooter: {
     justifyContent: 'flex-end',
-    marginRight: 10,
   },
   otherUserFooter: {
     justifyContent: 'flex-start',
-    marginLeft: 10,
   },
   timeText: {
     fontSize: 11,
@@ -1335,6 +1380,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  profileStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusOnline: {
+    backgroundColor: '#10b981',
+  },
+  statusOffline: {
+    backgroundColor: '#94a3b8',
+  },
+  profileStatusText: {
+    fontSize: 14,
+    color: '#64748b',
+  },
   messageUserButton: {
     backgroundColor: '#6366f1',
     paddingHorizontal: 24,
@@ -1439,29 +1505,7 @@ const styles = StyleSheet.create({
     color: '#6366f1',
     textAlign: 'center',
     fontWeight: '600',
-  }, 
-  // Add these new styles:
-  profileStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
   },
-  statusIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  statusOnline: {
-    backgroundColor: '#10b981',
-  },
-  statusOffline: {
-    backgroundColor: '#94a3b8',
-  },
-  profileStatusText: {
-    fontSize: 14,
-    color: '#64748b',
-  },  
-}); 
-  
-export default ChatScreen; 
+});
+
+export default ChatScreen;  

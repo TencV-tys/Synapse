@@ -3,7 +3,8 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, initializeAuth, getReactNativePersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Fixed import
+import { getStorage } from 'firebase/storage'; // ✅ ADD THIS IMPORT
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -11,7 +12,7 @@ const firebaseConfig = {
   authDomain: "synapse-app-6ac6c.firebaseapp.com",
   databaseURL: "https://synapse-app-6ac6c-default-rtdb.firebaseio.com",
   projectId: "synapse-app-6ac6c",
-  storageBucket: "synapse-app-6ac6c.firebasestorage.app",
+  storageBucket: "synapse-app-6ac6c.firebasestorage.app", // ✅ This is your storage bucket
   messagingSenderId: "948931826581",
   appId: "1:948931826581:web:494211501adfb4760f1c9c",
   measurementId: "G-EZKLWJDKY9"
@@ -24,7 +25,7 @@ const app = initializeApp(firebaseConfig);
 let auth; 
 try {
   auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage) // Use AsyncStorage directly
+    persistence: getReactNativePersistence(AsyncStorage)
   });
   console.log('✅ Firebase Auth initialized with AsyncStorage');
 } catch (error) {
@@ -40,6 +41,9 @@ try {
 // Initialize Firebase services
 export const firestore = getFirestore(app);
 export const database = getDatabase(app);
+export const storage = getStorage(app); // ✅ ADD THIS - Initialize Storage
 export { auth };
+
+console.log('✅ Firebase Storage initialized:', storage?.app?.name);
 
 export default app;
