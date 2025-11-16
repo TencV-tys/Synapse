@@ -8,7 +8,8 @@ import {
   getDocs, 
   query, 
   where,
-  onSnapshot 
+  onSnapshot,
+  getDoc
 } from 'firebase/firestore';
 import { firestore } from '../config/firebase';
 import sqliteService from './sqliteService';
@@ -25,8 +26,8 @@ export const notesService = {
         categoryId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        isPinned: noteData.isPinned || false,
-        isFavorite: noteData.isFavorite || false,
+        isPinned: Boolean(noteData.isPinned || false),
+        isFavorite: Boolean(noteData.isFavorite || false),
         tags: noteData.tags || [],
         permission: noteData.permission || 'private',
         syncStatus: 'synced'
@@ -73,13 +74,22 @@ export const notesService = {
   // Update existing note with offline support
   async updateNote(noteId, updates) {
     try {
+      // FIXED: Ensure boolean values are properly set
       const updatedNote = {
         ...updates,
         updatedAt: new Date().toISOString(),
         syncStatus: 'synced'
       };
 
-      console.log('✏️ Updating note:', noteId, 'Updates:', updates);
+      // Ensure boolean fields are explicitly set
+      if (updates.isPinned !== undefined) {
+        updatedNote.isPinned = Boolean(updates.isPinned);
+      }
+      if (updates.isFavorite !== undefined) {
+        updatedNote.isFavorite = Boolean(updates.isFavorite);
+      }
+
+      console.log('✏️ Updating note:', noteId, 'Updates:', updatedNote);
 
       // Get current note to check for category changes
       const currentNote = await this.getNoteById(noteId);
@@ -109,7 +119,7 @@ export const notesService = {
         }
       }
 
-      // Update SQLite
+      // Update SQLite - FIXED: Ensure we merge properly
       const currentNoteData = await sqliteService.getNoteById(noteId);
       if (currentNoteData) {
         const mergedNote = {
@@ -118,7 +128,7 @@ export const notesService = {
           id: noteId
         };
         await sqliteService.saveNote(mergedNote);
-        console.log('💾 Note updated in local storage:', mergedNote.title);
+        console.log('💾 Note updated in local storage:', mergedNote.title, 'isFavorite:', mergedNote.isFavorite);
       }
       
     } catch (error) {
@@ -172,18 +182,35 @@ export const notesService = {
     }
   },
 
-  // Toggle favorite status
+  // Toggle favorite status - FIXED VERSION
   async toggleFavorite(noteId, currentStatus) {
     try {
-      await this.updateNote(noteId, { isFavorite: !currentStatus });
-      console.log('⭐ Favorite toggled for note:', noteId, !currentStatus);
+      console.log('⭐ Toggling favorite for note:', noteId, 'Current status:', currentStatus);
+      
+      // FIXED: Get the current note first to ensure we have the latest data
+      const currentNote = await this.getNoteById(noteId);
+      if (!currentNote) {
+        throw new Error('Note not found');
+      }
+      
+      const newFavoriteStatus = !currentNote.isFavorite;
+      console.log('⭐ New favorite status will be:', newFavoriteStatus);
+      
+      // Use updateNote to toggle the favorite status
+      await this.updateNote(noteId, { 
+        isFavorite: newFavoriteStatus,
+        updatedAt: new Date().toISOString()
+      });
+      
+      console.log('✅ Favorite status updated to:', newFavoriteStatus);
+      return newFavoriteStatus;
     } catch (error) {
       console.error('❌ Error toggling favorite:', error);
       throw error;
     }
   },
 
-  // Get all notes for user with offline fallback
+  // Get all notes for user with offline fallback - FIXED VERSION
   async getUserNotes(userId) {
     try {
       let notes = [];
@@ -197,11 +224,17 @@ export const notesService = {
         );
         
         const querySnapshot = await getDocs(q);
-        notes = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          syncStatus: 'synced'
-        }));
+        notes = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          // FIXED: Ensure boolean conversion from Firebase data
+          return {
+            id: doc.id,
+            ...data,
+            isPinned: Boolean(data.isPinned),
+            isFavorite: Boolean(data.isFavorite),
+            syncStatus: 'synced'
+          };
+        });
         
         console.log('✅ Notes loaded from Firebase:', notes.length);
         
@@ -217,6 +250,13 @@ export const notesService = {
         console.log('🌐 Offline - loading notes from local storage');
         source = 'SQLite';
         notes = await sqliteService.getNotes(userId);
+        
+        // FIXED: Ensure boolean conversion from SQLite data
+        notes = notes.map(note => ({
+          ...note,
+          isPinned: Boolean(note.isPinned),
+          isFavorite: Boolean(note.isFavorite)
+        }));
       }
       
       // Sort by most recent first
@@ -396,73 +436,74 @@ export const notesService = {
       throw new Error('Failed to delete category: ' + error.message);
     }
   },
-async getUserCategories(userId) {
-  try {
-    let categories = [];
-    let source = 'Firebase';
-    
-    // Try Firebase first
+
+  async getUserCategories(userId) {
     try {
-      console.log('🔍 Attempting to load categories from Firebase for user:', userId);
+      let categories = [];
+      let source = 'Firebase';
       
-      const q = query(
-        collection(firestore, 'categories'),
-        where('userId', '==', userId)
-      );
+      // Try Firebase first
+      try {
+        console.log('🔍 Attempting to load categories from Firebase for user:', userId);
+        
+        const q = query(
+          collection(firestore, 'categories'),
+          where('userId', '==', userId)
+        );
+        
+        const querySnapshot = await getDocs(q);
+        console.log('🔍 Firebase categories query result:', {
+          empty: querySnapshot.empty,
+          size: querySnapshot.size,
+          docs: querySnapshot.docs.length
+        });
+        
+        categories = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          console.log('🔍 Processing category doc:', { id: doc.id, data });
+          return {
+            id: doc.id,
+            ...data,
+            syncStatus: 'synced'
+          };
+        });
+        
+        console.log('✅ Categories loaded from Firebase:', categories.length);
+        
+        // Save to SQLite
+        const savePromises = categories.map(category => 
+          sqliteService.saveCategory(category).catch(e => 
+            console.log('⚠️ Failed to save category to SQLite:', category.id, e.message)
+          )
+        );
+        await Promise.all(savePromises);
+        
+      } catch (firebaseError) {
+        console.log('🌐 Offline - loading categories from local storage:', firebaseError.message);
+        source = 'SQLite';
+        categories = await sqliteService.getCategories(userId);
+      }
       
-      const querySnapshot = await getDocs(q);
-      console.log('🔍 Firebase categories query result:', {
-        empty: querySnapshot.empty,
-        size: querySnapshot.size,
-        docs: querySnapshot.docs.length
-      });
+      // Ensure all categories have proper structure
+      const validatedCategories = categories.map(cat => ({
+        id: cat.id,
+        name: cat.name || 'Unnamed Category',
+        color: cat.color || '#6366f1',
+        userId: cat.userId || userId,
+        createdAt: cat.createdAt || new Date().toISOString(),
+        updatedAt: cat.updatedAt || new Date().toISOString(),
+        noteCount: typeof cat.noteCount === 'number' ? cat.noteCount : 0,
+        syncStatus: cat.syncStatus || 'synced'
+      }));
       
-      categories = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        console.log('🔍 Processing category doc:', { id: doc.id, data });
-        return {
-          id: doc.id,
-          ...data,
-          syncStatus: 'synced'
-        };
-      });
+      console.log(`📂 Loaded ${validatedCategories.length} categories from ${source}`);
+      return validatedCategories;
       
-      console.log('✅ Categories loaded from Firebase:', categories.length);
-      
-      // Save to SQLite
-      const savePromises = categories.map(category => 
-        sqliteService.saveCategory(category).catch(e => 
-          console.log('⚠️ Failed to save category to SQLite:', category.id, e.message)
-        )
-      );
-      await Promise.all(savePromises);
-      
-    } catch (firebaseError) {
-      console.log('🌐 Offline - loading categories from local storage:', firebaseError.message);
-      source = 'SQLite';
-      categories = await sqliteService.getCategories(userId);
+    } catch (error) {
+      console.error('❌ Error fetching categories:', error);
+      return [];
     }
-    
-    // Ensure all categories have proper structure
-    const validatedCategories = categories.map(cat => ({
-      id: cat.id,
-      name: cat.name || 'Unnamed Category',
-      color: cat.color || '#6366f1',
-      userId: cat.userId || userId,
-      createdAt: cat.createdAt || new Date().toISOString(),
-      updatedAt: cat.updatedAt || new Date().toISOString(),
-      noteCount: typeof cat.noteCount === 'number' ? cat.noteCount : 0,
-      syncStatus: cat.syncStatus || 'synced'
-    }));
-    
-    console.log(`📂 Loaded ${validatedCategories.length} categories from ${source}`);
-    return validatedCategories;
-    
-  } catch (error) {
-    console.error('❌ Error fetching categories:', error);
-    return [];
-  }
-},
+  },
 
   // Helper method to update category note counts
   async updateCategoryNoteCount(categoryId, userId) {
@@ -507,11 +548,17 @@ async getUserCategories(userId) {
       const unsubscribe = onSnapshot(q, 
         // Success callback
         async (snapshot) => {
-          const notes = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            syncStatus: 'synced'
-          }));
+          const notes = snapshot.docs.map(doc => {
+            const data = doc.data();
+            // FIXED: Ensure boolean conversion
+            return {
+              id: doc.id,
+              ...data,
+              isPinned: Boolean(data.isPinned),
+              isFavorite: Boolean(data.isFavorite),
+              syncStatus: 'synced'
+            };
+          });
           
           console.log('🔥 Firestore real-time update - notes:', notes.length);
           
@@ -542,7 +589,13 @@ async getUserCategories(userId) {
           
           try {
             const notes = await sqliteService.getNotes(userId);
-            const sortedNotes = notes.sort((a, b) => 
+            // FIXED: Ensure boolean conversion
+            const processedNotes = notes.map(note => ({
+              ...note,
+              isPinned: Boolean(note.isPinned),
+              isFavorite: Boolean(note.isFavorite)
+            }));
+            const sortedNotes = processedNotes.sort((a, b) => 
               new Date(b.updatedAt) - new Date(a.updatedAt)
             );
             callback(sortedNotes);
@@ -561,7 +614,13 @@ async getUserCategories(userId) {
       // Immediate fallback to SQLite
       sqliteService.getNotes(userId)
         .then(notes => {
-          const sortedNotes = notes.sort((a, b) => 
+          // FIXED: Ensure boolean conversion
+          const processedNotes = notes.map(note => ({
+            ...note,
+            isPinned: Boolean(note.isPinned),
+            isFavorite: Boolean(note.isFavorite)
+          }));
+          const sortedNotes = processedNotes.sort((a, b) => 
             new Date(b.updatedAt) - new Date(a.updatedAt)
           );
           callback(sortedNotes);
@@ -771,9 +830,12 @@ async getUserCategories(userId) {
           const noteRef = doc(firestore, 'notes', noteId);
           const noteSnap = await getDoc(noteRef);
           if (noteSnap.exists()) {
+            const data = noteSnap.data();
             note = {
               id: noteSnap.id,
-              ...noteSnap.data(),
+              ...data,
+              isPinned: Boolean(data.isPinned),
+              isFavorite: Boolean(data.isFavorite),
               syncStatus: 'synced'
             };
             // Save to SQLite for future access
@@ -782,6 +844,13 @@ async getUserCategories(userId) {
         } catch (firebaseError) {
           console.log('🌐 Could not fetch note from Firebase');
         }
+      } else {
+        // FIXED: Ensure boolean conversion from SQLite
+        note = {
+          ...note,
+          isPinned: Boolean(note.isPinned),
+          isFavorite: Boolean(note.isFavorite)
+        };
       }
       
       if (note) {
@@ -795,81 +864,83 @@ async getUserCategories(userId) {
       return null;
     }
   },
-  // Add this method to your notesService.js to debug Firebase categories
-async debugFirebaseCategories(userId) {
-  try {
-    console.log('🔍 DEBUG: Checking Firebase categories for user:', userId);
-    
-    const q = query(
-      collection(firestore, 'categories'),
-      where('userId', '==', userId)
-    );
-    
-    const querySnapshot = await getDocs(q);
-    console.log('🔍 DEBUG: Firebase categories snapshot:', {
-      exists: !querySnapshot.empty,
-      size: querySnapshot.size,
-      docs: querySnapshot.docs.map(doc => ({
+
+  // Debug method
+  async debugFirebaseCategories(userId) {
+    try {
+      console.log('🔍 DEBUG: Checking Firebase categories for user:', userId);
+      
+      const q = query(
+        collection(firestore, 'categories'),
+        where('userId', '==', userId)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      console.log('🔍 DEBUG: Firebase categories snapshot:', {
+        exists: !querySnapshot.empty,
+        size: querySnapshot.size,
+        docs: querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          data: doc.data()
+        }))
+      });
+      
+      return querySnapshot.docs.map(doc => ({
         id: doc.id,
-        data: doc.data()
-      }))
-    });
-    
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-  } catch (error) {
-    console.error('🔍 DEBUG: Error checking Firebase categories:', error);
-    return [];
-  }
-},
-// Add this method to initialize default categories
-async initializeDefaultCategories(userId) {
-  try {
-    console.log('🏗️ Initializing default categories for user:', userId);
-    
-    const defaultCategories = [
-      {
-        name: 'Personal',
-        color: '#6366f1',
-        noteCount: 0
-      },
-      {
-        name: 'Work',
-        color: '#10b981',
-        noteCount: 0
-      },
-      {
-        name: 'Study',
-        color: '#f59e0b',
-        noteCount: 0
-      },
-      {
-        name: 'Ideas',
-        color: '#8b5cf6',
-        noteCount: 0
-      }
-    ];
-    
-    const createdCategories = [];
-    
-    for (const categoryData of defaultCategories) {
-      try {
-        const category = await this.createCategory(categoryData, userId);
-        createdCategories.push(category);
-        console.log('✅ Created default category:', categoryData.name);
-      } catch (error) {
-        console.log('⚠️ Could not create default category:', categoryData.name, error.message);
-      }
+        ...doc.data()
+      }));
+    } catch (error) {
+      console.error('🔍 DEBUG: Error checking Firebase categories:', error);
+      return [];
     }
-    
-    console.log(`🏗️ Created ${createdCategories.length} default categories`);
-    return createdCategories;
-    
-  } catch (error) {
-    console.error('❌ Error initializing default categories:', error);
-    return [];
+  },
+
+  // Initialize default categories
+  async initializeDefaultCategories(userId) {
+    try {
+      console.log('🏗️ Initializing default categories for user:', userId);
+      
+      const defaultCategories = [
+        {
+          name: 'Personal',
+          color: '#6366f1',
+          noteCount: 0
+        },
+        {
+          name: 'Work',
+          color: '#10b981',
+          noteCount: 0
+        },
+        {
+          name: 'Study',
+          color: '#f59e0b',
+          noteCount: 0
+        },
+        {
+          name: 'Ideas',
+          color: '#8b5cf6',
+          noteCount: 0
+        }
+      ];
+      
+      const createdCategories = [];
+      
+      for (const categoryData of defaultCategories) {
+        try {
+          const category = await this.createCategory(categoryData, userId);
+          createdCategories.push(category);
+          console.log('✅ Created default category:', categoryData.name);
+        } catch (error) {
+          console.log('⚠️ Could not create default category:', categoryData.name, error.message);
+        }
+      }
+      
+      console.log(`🏗️ Created ${createdCategories.length} default categories`);
+      return createdCategories;
+      
+    } catch (error) {
+      console.error('❌ Error initializing default categories:', error);
+      return [];
+    }
   }
-}
-};
+}; 

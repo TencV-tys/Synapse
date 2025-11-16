@@ -13,7 +13,9 @@ import {
   ActivityIndicator,
   Modal,
   Image,
-  Keyboard
+  Keyboard,
+  ActionSheetIOS,
+  Share
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { database } from '../config/firebase';
@@ -41,6 +43,13 @@ const ChatScreen = ({ route, navigation }) => {
   const [showChatSelector, setShowChatSelector] = useState(false);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  
+  // New states for message actions
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editText, setEditText] = useState('');
+  
   const flatListRef = useRef(null);
 
   // Keyboard handling
@@ -174,18 +183,18 @@ const ChatScreen = ({ route, navigation }) => {
       const chatRef = getActiveChatRef();
       const newMessageRef = push(chatRef);
       
-      const messageData = {
-        text: messageText,
-        userId: user.uid,
-        userName: user.name || user.email.split('@')[0],
-        userEmail: user.email,
-        userProfilePic: user.profilePic,
-        userType: user.userType || 'student',
-        timestamp: serverTimestamp(),
-        chatType: activeChat === 'public' ? 'public' : 'private',
-        recipientId: activeChat !== 'public' ? activeChat : null
-      };
-      
+     const messageData = {
+  text: messageText,
+  userId: user.uid,
+  userName: user.name || user.displayName || user.email.split('@')[0],
+  userEmail: user.email,
+  userProfilePic: user.photoURL || user.profilePic || null, // Ensure null if undefined
+  userType: user.userType || 'student',
+  timestamp: serverTimestamp(),
+  chatType: activeChat === 'public' ? 'public' : 'private',
+  recipientId: activeChat !== 'public' ? activeChat : null
+};
+       
       await set(newMessageRef, messageData);
       setNewMessage('');
       
@@ -203,15 +212,218 @@ const ChatScreen = ({ route, navigation }) => {
     }
   };
 
+  // Message Action Handlers
+  const handleMessageLongPress = (message) => {
+    setSelectedMessage(message);
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Copy Text', 'Edit Message', 'Share', 'Delete'],
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: 4,
+        },
+        (buttonIndex) => {
+          handleActionSheetSelection(buttonIndex);
+        }
+      );
+    } else {
+      setActionSheetVisible(true);
+    }
+  };
+
+  const handleActionSheetSelection = (buttonIndex) => {
+    setActionSheetVisible(false);
+    
+    if (!selectedMessage) return;
+
+    switch (buttonIndex) {
+      case 1: // Copy
+        handleCopyText();
+        break;
+      case 2: // Edit
+        handleEditMessage();
+        break;
+      case 3: // Share
+        handleShareMessage();
+        break;
+      case 4: // Delete
+        handleDeleteMessage();
+        break;
+    }
+    
+    setSelectedMessage(null);
+  };
+
+  // FIXED: Manual clipboard without package
+  const handleCopyText = async () => {
+    if (!selectedMessage) return;
+    
+    try {
+      // Simple manual copy - show text in alert
+      Alert.alert(
+        'Copy Text',
+        selectedMessage.text,
+        [
+          {
+            text: 'OK',
+            style: 'default'
+          },
+          {
+            text: 'Select All',
+            onPress: () => {
+              // This helps users manually select and copy the text
+              console.log('📋 Text ready for manual copy:', selectedMessage.text);
+            }
+          }
+        ],
+        { cancelable: true }
+      );
+      
+      console.log('📋 Text to copy manually:', selectedMessage.text);
+      
+    } catch (error) {
+      console.error('❌ Copy error:', error);
+      Alert.alert('Message Text', selectedMessage.text);
+    }
+  };
+
+  const handleEditMessage = () => {
+    if (!selectedMessage) return;
+    
+    // Only allow editing own messages
+    if (selectedMessage.userId !== user?.uid) {
+      Alert.alert('Cannot Edit', 'You can only edit your own messages');
+      return;
+    }
+    
+    setEditingMessage(selectedMessage);
+    setEditText(selectedMessage.text);
+  };
+
+  const handleShareMessage = async () => {
+    if (!selectedMessage) return;
+    
+    try {
+      await Share.share({
+        message: `${selectedMessage.userName}: ${selectedMessage.text}`,
+        title: 'Message from Synapse Chat'
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to share message');
+    }
+  };
+
+  const handleDeleteMessage = () => {
+    if (!selectedMessage) return;
+    
+    // Only allow deleting own messages
+    if (selectedMessage.userId !== user?.uid) {
+      Alert.alert('Cannot Delete', 'You can only delete your own messages');
+      return;
+    }
+    
+    Alert.alert(
+      'Delete Message',
+      'Are you sure you want to delete this message?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: () => confirmDeleteMessage()
+        }
+      ]
+    );
+  };
+
+  const confirmDeleteMessage = async () => {
+    if (!selectedMessage) return;
+    
+    try {
+      const chatRef = getActiveChatRef();
+      const messageRef = ref(database, `chats/${activeChat === 'public' ? 'public' : `private/${[user.uid, activeChat].sort().join('_')}`}/${selectedMessage.id}`);
+      
+      await set(messageRef, null);
+      Alert.alert('Success', 'Message deleted');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to delete message');
+    }
+  };
+
+  const saveEditedMessage = async () => {
+    if (!editingMessage || !editText.trim()) return;
+    
+    try {
+      const chatRef = getActiveChatRef();
+      const messageRef = ref(database, `chats/${activeChat === 'public' ? 'public' : `private/${[user.uid, activeChat].sort().join('_')}`}/${editingMessage.id}`);
+      
+      await set(messageRef, {
+        ...editingMessage,
+        text: editText.trim(),
+        editedAt: serverTimestamp(),
+        isEdited: true
+      });
+      
+      setEditingMessage(null);
+      setEditText('');
+      Alert.alert('Success', 'Message updated');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update message');
+    }
+  };
+
   const startDirectMessage = (targetUser) => {
     setActiveChat(targetUser.id);
     setActiveChatName(targetUser.name || targetUser.email.split('@')[0]);
     setShowChatSelector(false);
   };
 
-  const showProfile = (userData) => {
-    setSelectedUser(userData);
-    setShowUserProfile(true);
+  // FIXED: Profile click handler - get complete user data
+  const showProfile = async (messageUserData) => {
+    try {
+      console.log('👤 Showing profile for:', messageUserData);
+      
+      // Try to find the complete user data from the users list first
+      let completeUserData = users.find(u => u.id === messageUserData.userId);
+      
+      if (!completeUserData) {
+        // If not found in current users list, try to get from Firebase
+        console.log('🔍 User not in current list, fetching from Firebase...');
+        const userRef = ref(database, `users/${messageUserData.userId}`);
+        
+        // Create a one-time listener to get user data
+        onValue(userRef, (snapshot) => {
+          const userData = snapshot.val();
+          if (userData) {
+            setSelectedUser({
+              id: messageUserData.userId,
+              name: userData.name || messageUserData.userName,
+              email: userData.email || messageUserData.userEmail,
+              userType: userData.userType || messageUserData.userType || 'student',
+              profilePic: userData.profilePic || messageUserData.userProfilePic,
+              lastActive: userData.lastActive,
+              isOnline: userData.isOnline
+            });
+            setShowUserProfile(true);
+          }
+        }, { onlyOnce: true });
+      } else {
+        // Use the complete user data we already have
+        setSelectedUser(completeUserData);
+        setShowUserProfile(true);
+      }
+    } catch (error) {
+      console.error('❌ Error loading user profile:', error);
+      // Fallback: Use the basic data from the message
+      setSelectedUser({
+        id: messageUserData.userId,
+        name: messageUserData.userName,
+        email: messageUserData.userEmail,
+        userType: messageUserData.userType || 'student',
+        profilePic: messageUserData.userProfilePic
+      });
+      setShowUserProfile(true);
+    }
   };
 
   const formatTime = (timestamp) => {
@@ -249,89 +461,115 @@ const ChatScreen = ({ route, navigation }) => {
     }
   };
 
-  const renderMessage = ({ item, index }) => {
-    const isCurrentUser = item.userId === user?.uid;
-    const showHeader = index === 0 || item.userId !== messages[index - 1]?.userId;
-
-    return (
-      <View style={[
-        styles.messageContainer,
-        isCurrentUser ? styles.currentUserMessage : styles.otherUserMessage
-      ]}>
-        {!isCurrentUser && showHeader && (
-          <TouchableOpacity 
-            style={styles.messageHeader}
-            onPress={() => showProfile(item)}
-          >
-            {item.userProfilePic ? (
-              <Image source={{ uri: item.userProfilePic }} style={styles.messageAvatar} />
-            ) : (
-              <View style={[styles.messageAvatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarText}>
-                  {item.userName ? item.userName.charAt(0).toUpperCase() : 'U'}
-                </Text>
-              </View>
-            )}
-            <View style={styles.userInfo}>
-              <Text style={styles.userName}>{item.userName}</Text>
-              <View style={styles.roleContainer}>
-                <View 
-                  style={[
-                    styles.roleBadge, 
-                    { backgroundColor: getRoleColor(item.userType) }
-                  ]}
-                >
-                  <Text style={styles.roleText}>
-                    {getRoleLabel(item.userType)}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
-        
-        <View style={[
-          styles.messageBubble,
-          isCurrentUser ? styles.currentUserBubble : styles.otherUserBubble
-        ]}>
-          <Text style={[
-            styles.messageText,
-            isCurrentUser ? styles.currentUserText : styles.otherUserText
-          ]}>
-            {item.text}
-          </Text>
-        </View>
-        
-        <View style={[
-          styles.messageFooter,
-          isCurrentUser ? styles.currentUserFooter : styles.otherUserFooter
-        ]}>
-          <Text style={styles.timeText}>{formatTime(item.timestamp)}</Text>
-          {isCurrentUser && (
-            <Text style={styles.statusIcon}>✓</Text>
-          )}
-        </View>
-      </View>
-    );
+  // FIXED: Safe user name display
+  const getUserDisplayName = (userData) => {
+    if (!userData) return 'Unknown User';
+    return userData.name || userData.userName || (userData.email ? userData.email.split('@')[0] : 'User');
   };
 
+  // FIXED: Safe email display
+  const getUserEmail = (userData) => {
+    if (!userData) return 'No email';
+    return userData.email || userData.userEmail || 'No email available';
+  };
+// In ChatScreen.js, replace the renderMessage function with this:
+
+const renderMessage = ({ item, index }) => {
+  const isCurrentUser = item.userId === user?.uid;
+  const showHeader = index === 0 || item.userId !== messages[index - 1]?.userId;
+
+  return (
+    <TouchableOpacity 
+      style={[
+        styles.messageContainer,
+        isCurrentUser ? styles.currentUserMessage : styles.otherUserMessage
+      ]}
+      onLongPress={() => handleMessageLongPress(item)}
+      delayLongPress={500}
+      activeOpacity={0.7}
+    >
+      {/* Show header for OTHER users' messages only */}
+      {!isCurrentUser && showHeader && (
+        <TouchableOpacity 
+          style={styles.messageHeader}
+          onPress={() => showProfile(item)}
+          activeOpacity={0.7}
+        >
+          {item.userProfilePic ? (
+            <Image source={{ uri: item.userProfilePic }} style={styles.messageAvatar} />
+          ) : (
+            <View style={[styles.messageAvatar, styles.avatarPlaceholder]}>
+              <Text style={styles.avatarText}>
+                {getUserDisplayName(item).charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>{getUserDisplayName(item)}</Text>
+            <View style={styles.roleContainer}>
+              <View 
+                style={[
+                  styles.roleBadge, 
+                  { backgroundColor: getRoleColor(item.userType) }
+                ]}
+              >
+                <Text style={styles.roleText}>
+                  {getRoleLabel(item.userType)}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      )}
+      
+      <View style={[
+        styles.messageBubble,
+        isCurrentUser ? styles.currentUserBubble : styles.otherUserBubble
+      ]}>
+        <Text style={[
+          styles.messageText,
+          isCurrentUser ? styles.currentUserText : styles.otherUserText
+        ]}>
+          {item.text}
+        </Text>
+      </View>
+      
+      <View style={[
+        styles.messageFooter,
+        isCurrentUser ? styles.currentUserFooter : styles.otherUserFooter
+      ]}>
+        <Text style={styles.timeText}>{formatTime(item.timestamp)}</Text>
+        {item.isEdited && (
+          <Text style={styles.editedText}>(edited)</Text>
+        )}
+        {isCurrentUser && (
+          <Text style={styles.statusIcon}>✓</Text>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+};
   const renderUserItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.userItem}
       onPress={() => startDirectMessage(item)}
-      onLongPress={() => showProfile(item)}
+      onLongPress={() => {
+        setSelectedUser(item);
+        setShowUserProfile(true);
+      }}
+      activeOpacity={0.7}
     >
       {item.profilePic ? (
         <Image source={{ uri: item.profilePic }} style={styles.userAvatar} />
       ) : (
         <View style={[styles.userAvatar, styles.avatarPlaceholder]}>
           <Text style={styles.avatarText}>
-            {item.name ? item.name.charAt(0).toUpperCase() : 'U'}
+            {getUserDisplayName(item).charAt(0).toUpperCase()}
           </Text>
         </View>
       )}
       <View style={styles.userInfo}>
-        <Text style={styles.userName}>{item.name || item.email.split('@')[0]}</Text>
+        <Text style={styles.userName}>{getUserDisplayName(item)}</Text>
         <View style={styles.userDetails}>
           <View 
             style={[
@@ -536,15 +774,15 @@ const ChatScreen = ({ route, navigation }) => {
                 ) : (
                   <View style={[styles.profileAvatar, styles.avatarPlaceholder]}>
                     <Text style={styles.profileAvatarText}>
-                      {selectedUser.name ? selectedUser.name.charAt(0).toUpperCase() : 'U'}
+                      {getUserDisplayName(selectedUser).charAt(0).toUpperCase()}
                     </Text>
                   </View>
                 )}
                 
                 <Text style={styles.profileName}>
-                  {selectedUser.name || selectedUser.email.split('@')[0]}
+                  {getUserDisplayName(selectedUser)}
                 </Text>
-                <Text style={styles.profileEmail}>{selectedUser.email}</Text>
+                <Text style={styles.profileEmail}>{getUserEmail(selectedUser)}</Text>
                 
                 <View 
                   style={[
@@ -554,6 +792,13 @@ const ChatScreen = ({ route, navigation }) => {
                 >
                   <Text style={styles.profileRoleText}>
                     {getRoleLabel(selectedUser.userType)}
+                  </Text>
+                </View>
+
+                <View style={styles.profileStatus}>
+                  <View style={[styles.statusIndicator, selectedUser.isOnline ? styles.statusOnline : styles.statusOffline]} />
+                  <Text style={styles.profileStatusText}>
+                    {selectedUser.isOnline ? 'Online' : 'Offline'}
                   </Text>
                 </View>
 
@@ -571,10 +816,104 @@ const ChatScreen = ({ route, navigation }) => {
           </View>
         </View>
       </Modal>
+
+      {/* Edit Message Modal */}
+      <Modal
+        visible={!!editingMessage}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setEditingMessage(null)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.editModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Message</Text>
+              <TouchableOpacity onPress={() => setEditingMessage(null)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <TextInput
+              style={styles.editTextInput}
+              value={editText}
+              onChangeText={setEditText}
+              multiline
+              maxLength={500}
+              placeholder="Edit your message..."
+              autoFocus
+            />
+            
+            <View style={styles.editModalActions}>
+              <TouchableOpacity 
+                style={styles.cancelEditButton}
+                onPress={() => setEditingMessage(null)}
+              >
+                <Text style={styles.cancelEditButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[
+                  styles.saveEditButton,
+                  !editText.trim() && styles.saveEditButtonDisabled
+                ]}
+                onPress={saveEditedMessage}
+                disabled={!editText.trim()}
+              >
+                <Text style={styles.saveEditButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Android ActionSheet */}
+      {Platform.OS === 'android' && actionSheetVisible && (
+        <View style={styles.actionSheetContainer}>
+          <View style={styles.actionSheet}>
+            <TouchableOpacity 
+              style={styles.actionSheetOption}
+              onPress={handleCopyText}
+            >
+              <Text style={styles.actionSheetOptionText}>Copy Text</Text>
+            </TouchableOpacity>
+            
+            {selectedMessage?.userId === user?.uid && (
+              <TouchableOpacity 
+                style={styles.actionSheetOption}
+                onPress={handleEditMessage}
+              >
+                <Text style={styles.actionSheetOptionText}>Edit Message</Text>
+              </TouchableOpacity>
+            )}
+            
+            <TouchableOpacity 
+              style={styles.actionSheetOption}
+              onPress={handleShareMessage}
+            >
+              <Text style={styles.actionSheetOptionText}>Share</Text>
+            </TouchableOpacity>
+            
+            {selectedMessage?.userId === user?.uid && (
+              <TouchableOpacity 
+                style={styles.actionSheetDestructiveOption}
+                onPress={handleDeleteMessage}
+              >
+                <Text style={styles.actionSheetDestructiveOptionText}>Delete</Text>
+              </TouchableOpacity>
+            )}
+            
+            <TouchableOpacity 
+              style={styles.actionSheetCancel}
+              onPress={() => setActionSheetVisible(false)}
+            >
+              <Text style={styles.actionSheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -769,6 +1108,12 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     marginRight: 4,
   },
+  editedText: {
+    fontSize: 10,
+    color: '#94a3b8',
+    fontStyle: 'italic',
+    marginRight: 4,
+  },
   statusIcon: {
     fontSize: 11,
     color: '#94a3b8',
@@ -780,11 +1125,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
     alignItems: 'flex-end',
-     paddingBottom: Platform.OS === 'ios' ? 60 : 50,
+    paddingBottom: Platform.OS === 'ios' ? 60 : 50,
   },
   textInput: {
     flex: 1,
-    backgroundColor: '#f8fafc', 
+    backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
     borderRadius: 25,
@@ -1000,7 +1345,123 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 16,
+  },
+  // Edit Modal Styles
+  editModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    margin: 20,
+    maxHeight: '60%',
+  },
+  editTextInput: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 15,
+    fontSize: 16,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    marginVertical: 15,
+  },
+  editModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  cancelEditButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
+  cancelEditButtonText: {
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  saveEditButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#6366f1',
+  },
+  saveEditButtonDisabled: {
+    backgroundColor: '#cbd5e1',
+  },
+  saveEditButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  // Action Sheet Styles for Android
+  actionSheetContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  actionSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+  },
+  actionSheetOption: {
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  actionSheetOptionText: {
+    fontSize: 16,
+    color: '#334155',
+    textAlign: 'center',
+  },
+  actionSheetDestructiveOption: {
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  actionSheetDestructiveOptionText: {
+    fontSize: 16,
+    color: '#dc2626',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  actionSheetCancel: {
+    paddingVertical: 15,
+    marginTop: 10,
+  },
+  actionSheetCancelText: {
+    fontSize: 16,
+    color: '#6366f1',
+    textAlign: 'center',
+    fontWeight: '600',
   }, 
-});
-
-export default ChatScreen;
+  // Add these new styles:
+  profileStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusOnline: {
+    backgroundColor: '#10b981',
+  },
+  statusOffline: {
+    backgroundColor: '#94a3b8',
+  },
+  profileStatusText: {
+    fontSize: 14,
+    color: '#64748b',
+  },  
+}); 
+  
+export default ChatScreen; 

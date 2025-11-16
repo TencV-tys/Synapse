@@ -449,9 +449,9 @@ const saveNote = async (note) => {
         }
       );
     }); 
-  });
-};
-
+  }); 
+}; 
+ 
 const getNotes = async (userId) => {
   return new Promise((resolve, reject) => {
     if (!db) {

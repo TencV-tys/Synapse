@@ -30,51 +30,50 @@ export const NotesProvider = ({ children }) => {
   }, []);
   
   // Load notes and categories when user changes
-useEffect(() => {
-  console.log('🔄 NotesContext: User changed', user ? user.uid : 'No user');
-  
-  const loadData = async () => {
-    if (!user) {
-      setNotes([]);
-      setCategories([]);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      console.log('📚 Loading data for user:', user.uid);
-      const [userNotes, userCategories] = await Promise.all([
-        notesService.getUserNotes(user.uid),
-        notesService.getUserCategories(user.uid)
-      ]);
-      
-      console.log('✅ Data loaded:', {
-        notes: userNotes.length,
-        categories: userCategories.length
-      });
-      
-      // 🆕 Initialize default categories if none exist
-      let finalCategories = userCategories;
-      if (userCategories.length === 0) {
-        console.log('🆕 No categories found, initializing default categories...');
-        finalCategories = await notesService.initializeDefaultCategories(user.uid);
+  useEffect(() => {
+    console.log('🔄 NotesContext: User changed', user ? user.uid : 'No user');
+    
+    const loadData = async () => {
+      if (!user) {
+        setNotes([]);
+        setCategories([]);
+        return;
       }
-      
-      setNotes(userNotes);
-      setCategories(finalCategories);
-      
-    } catch (error) {
-      console.error('❌ Error loading data:', error);
-      setNotes([]);
-      setCategories([]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  // 🚨 IMPORTANT: Actually call the loadData function!
-  loadData();
-}, [user]);
+      setLoading(true);
+      try {
+        console.log('📚 Loading data for user:', user.uid);
+        const [userNotes, userCategories] = await Promise.all([
+          notesService.getUserNotes(user.uid),
+          notesService.getUserCategories(user.uid)
+        ]);
+        
+        console.log('✅ Data loaded:', {
+          notes: userNotes.length,
+          categories: userCategories.length
+        });
+        
+        // 🆕 Initialize default categories if none exist
+        let finalCategories = userCategories;
+        if (userCategories.length === 0) {
+          console.log('🆕 No categories found, initializing default categories...');
+          finalCategories = await notesService.initializeDefaultCategories(user.uid);
+        }
+        
+        setNotes(userNotes);
+        setCategories(finalCategories);
+        
+      } catch (error) {
+        console.error('❌ Error loading data:', error);
+        setNotes([]);
+        setCategories([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [user]);
   
   // Real-time subscription to user notes
   useEffect(() => {
@@ -221,6 +220,57 @@ useEffect(() => {
     }
   };
 
+  // Toggle operations - FIXED VERSION
+  const togglePin = async (id) => {
+    const note = notes.find(note => note.id === id);
+    if (note) {
+      try {
+        const newPinStatus = !note.isPinned;
+        console.log('📌 Toggling pin for note:', id, 'New status:', newPinStatus);
+        
+        await notesService.updateNote(id, { 
+          isPinned: newPinStatus,
+          updatedAt: new Date().toISOString()
+        });
+        
+        // Update local state immediately for better UX
+        setNotes(prev => prev.map(n => 
+          n.id === id ? { ...n, isPinned: newPinStatus } : n
+        ));
+        
+        console.log('✅ Pin toggled successfully');
+      } catch (error) {
+        console.error('❌ Error toggling pin:', error);
+        throw error;
+      }
+    }
+  };
+
+  const toggleFavorite = async (id) => {
+    const note = notes.find(note => note.id === id);
+    if (note) {
+      try {
+        const newFavoriteStatus = !note.isFavorite;
+        console.log('⭐ Toggling favorite for note:', id, 'New status:', newFavoriteStatus);
+        
+        await notesService.updateNote(id, { 
+          isFavorite: newFavoriteStatus,
+          updatedAt: new Date().toISOString()
+        });
+        
+        // Update local state immediately for better UX
+        setNotes(prev => prev.map(n => 
+          n.id === id ? { ...n, isFavorite: newFavoriteStatus } : n
+        ));
+        
+        console.log('✅ Favorite toggled successfully');
+      } catch (error) {
+        console.error('❌ Error toggling favorite:', error);
+        throw error;
+      }
+    }
+  };
+
   // Refresh categories data
   const refreshCategories = async () => {
     if (!user) return;
@@ -317,41 +367,6 @@ useEffect(() => {
     }
   };
 
-  // Toggle operations
-  const togglePin = async (id) => {
-    const note = notes.find(note => note.id === id);
-    if (note) {
-      try {
-        await notesService.togglePin(id, note.isPinned);
-        
-        // Update local state immediately for better UX
-        setNotes(prev => prev.map(n => 
-          n.id === id ? { ...n, isPinned: !n.isPinned } : n
-        ));
-      } catch (error) {
-        console.error('❌ Error toggling pin:', error);
-        throw error;
-      }
-    }
-  };
-
-  const toggleFavorite = async (id) => {
-    const note = notes.find(note => note.id === id);
-    if (note) {
-      try {
-        await notesService.toggleFavorite(id, note.isFavorite);
-        
-        // Update local state immediately for better UX
-        setNotes(prev => prev.map(n => 
-          n.id === id ? { ...n, isFavorite: !n.isFavorite } : n
-        ));
-      } catch (error) {
-        console.error('❌ Error toggling favorite:', error);
-        throw error;
-      }
-    }
-  };
-
   // Getters
   const getPinnedNotes = () => notes.filter(note => note.isPinned);
   const getFavoriteNotes = () => notes.filter(note => note.isFavorite);
@@ -430,4 +445,4 @@ export const useNotes = () => {
     throw new Error('useNotes must be used within a NotesProvider');
   }
   return context;
-}; 
+};

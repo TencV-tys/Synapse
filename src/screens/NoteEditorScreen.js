@@ -12,7 +12,8 @@ import {
   Modal,
   FlatList,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Animated
 } from 'react-native';
 import { useNotes } from '../context/NotesContext';
 import { useAuth } from '../context/AuthContext';
@@ -29,6 +30,9 @@ const NoteEditorScreen = ({ route, navigation }) => {
   const [isPublic, setIsPublic] = useState(false);
   const [loading, setLoading] = useState(false);
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  
+  // Animation for toggle
+  const toggleAnim = useState(new Animated.Value(0))[0];
 
   useEffect(() => {
     if (existingNote) {
@@ -41,6 +45,15 @@ const NoteEditorScreen = ({ route, navigation }) => {
       setCategoryId(initialCategoryId);
     }
   }, [existingNote, initialCategoryId]);
+
+  // Animate toggle when isPublic changes
+  useEffect(() => {
+    Animated.timing(toggleAnim, {
+      toValue: isPublic ? 1 : 0,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
+  }, [isPublic]);
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -108,6 +121,18 @@ const NoteEditorScreen = ({ route, navigation }) => {
     setIsPublic(!isPublic);
   };
 
+  // Calculate knob position
+  const knobPosition = toggleAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [2, 22], // Move from left to right
+  });
+
+  // Background color interpolation
+  const toggleBackgroundColor = toggleAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#cbd5e1', '#6366f1'],
+  });
+
   return (
     <KeyboardAvoidingView 
       style={styles.container}
@@ -147,10 +172,11 @@ const NoteEditorScreen = ({ route, navigation }) => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.editorContent}
         >
-          {/* Privacy Toggle */}
+          {/* Privacy Toggle - FIXED */}
           <TouchableOpacity 
             style={styles.privacyToggle}
             onPress={togglePrivacy}
+            activeOpacity={0.7}
           >
             <View style={styles.privacyInfo}>
               <Text style={styles.privacyLabel}>
@@ -160,9 +186,21 @@ const NoteEditorScreen = ({ route, navigation }) => {
                 {isPublic ? 'Others can view this note' : 'Only you can see this note'}
               </Text>
             </View>
-            <View style={[styles.toggleSwitch, isPublic && styles.toggleSwitchActive]}>
-              <View style={styles.toggleKnob} />
-            </View>
+            
+            {/* Animated Toggle Switch */}
+            <Animated.View 
+              style={[
+                styles.toggleSwitch, 
+                { backgroundColor: toggleBackgroundColor }
+              ]}
+            >
+              <Animated.View 
+                style={[
+                  styles.toggleKnob,
+                  { transform: [{ translateX: knobPosition }] }
+                ]} 
+              />
+            </Animated.View>
           </TouchableOpacity>
 
           {/* Category Selector */}
@@ -318,7 +356,7 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 100, // Extra padding to account for status container
   },
-  // Privacy Toggle Styles
+  // Privacy Toggle Styles - FIXED
   privacyToggle: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -347,18 +385,19 @@ const styles = StyleSheet.create({
     width: 50,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#cbd5e1',
     padding: 2,
     justifyContent: 'center',
-  },
-  toggleSwitchActive: {
-    backgroundColor: '#6366f1',
   },
   toggleKnob: {
     width: 24,
     height: 24,
     borderRadius: 12,
     backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
   // Category Styles
   categorySelector: {
@@ -468,7 +507,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 24,
     width: '90%',
-    maxWidth: 400,
+    maxWidth: 400, 
     maxHeight: '80%',
   },
   modalTitle: {

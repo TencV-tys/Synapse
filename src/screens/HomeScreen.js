@@ -118,6 +118,12 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
+  // Clickable profile picture - navigate directly to profile
+  const handleProfilePicturePress = () => {
+    console.log('👤 Profile picture pressed, navigating to Profile');
+    navigation.navigate('Profile');
+  };
+
   // Share note function - only for public notes
   const handleShareNote = async (note) => {
     if (!isOnline) {
@@ -256,24 +262,28 @@ const HomeScreen = ({ navigation }) => {
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          {user?.profilePic ? (
-            <Image 
-              source={{ uri: user.profilePic }} 
-              style={styles.profilePic}
-              placeholder={{ blurhash: 'L00p#k00RjRj~qayayay00Rj-;ay' }}
-              contentFit="cover"
-              transition={300}
-              onError={(e) => {
-                console.log('❌ Failed to load profile picture, using placeholder');
-              }}
-            />
-          ) : (
-            <View style={styles.profilePicPlaceholder}>
-              <Text style={styles.profilePicText}>
-                {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
-              </Text>
-            </View>
-          )}
+          {/* Clickable Profile Picture */}
+          <TouchableOpacity onPress={handleProfilePicturePress}>
+            {user?.profilePic ? (
+              <Image 
+                source={{ uri: user.profilePic }} 
+                style={styles.profilePic}
+                placeholder={{ blurhash: 'L00p#k00RjRj~qayayay00Rj-;ay' }}
+                contentFit="cover"
+                transition={300}
+                onError={(e) => {
+                  console.log('❌ Failed to load profile picture, using placeholder');
+                }}
+              />
+            ) : (
+              <View style={styles.profilePicPlaceholder}>
+                <Text style={styles.profilePicText}>
+                  {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          
           <View style={styles.welcomeContainer}>
             <Text style={styles.welcome}>Welcome back,</Text>
             <Text style={styles.userName}>{user?.name || user?.email}!</Text>
@@ -497,7 +507,7 @@ const HomeScreen = ({ navigation }) => {
         visible={shareModalVisible}
         onClose={closeShareModal}
         note={selectedNote}
-          navigation={navigation} 
+        navigation={navigation} 
       />
     </View>
   ); 

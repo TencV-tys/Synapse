@@ -8,7 +8,9 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
-  Alert
+  Alert,
+  Modal,
+  RefreshControl
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { database } from '../config/firebase';
@@ -19,56 +21,67 @@ const DirectMessagesScreen = ({ navigation }) => {
   const [users, setUsers] = useState([]);
   const [recentChats, setRecentChats] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [hasData, setHasData] = useState(false);
+  const [showUserProfile, setShowUserProfile] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
 
-  useEffect(() => {
-    console.log('💬 DirectMessagesScreen mounted - User:', user?.email);
-    
-    if (!database) {
-      console.error('❌ Database not initialized');
-      setLoading(false);
-      return;
-    }
-
-    // Load all users
-    const usersRef = ref(database, 'users');
-    console.log('🔍 Setting up users listener...');
-    
-    const usersUnsubscribe = onValue(usersRef, (snapshot) => {
-      try {
-        const data = snapshot.val();
-        console.log('📊 Users data received:', data);
-        
-        if (data) {
-          const usersArray = Object.entries(data)
-            .map(([id, userData]) => ({
-              id,
-              ...userData
-            }))
-            .filter(u => u.id !== user?.uid); // Exclude current user
+  const loadUsers = () => {
+    return new Promise((resolve) => {
+      const usersRef = ref(database, 'users');
+      console.log('🔍 Setting up users listener...');
+      
+      const usersUnsubscribe = onValue(usersRef, (snapshot) => {
+        try {
+          const data = snapshot.val();
+          console.log('📊 Users data received:', data);
           
-          console.log(`👥 Processed ${usersArray.length} users (excluding current user)`);
-          setUsers(usersArray);
-          setHasData(usersArray.length > 0);
-        } else {
-          console.log('❌ No users found in database');
-          setUsers([]);
+          if (data) {
+            const usersArray = Object.entries(data)
+              .map(([id, userData]) => ({
+                id,
+                // Ensure complete user profile data
+                name: userData.name || userData.displayName || (userData.email ? userData.email.split('@')[0] : 'User'),
+                email: userData.email || 'No email',
+                profilePic: userData.profilePic || userData.photoURL || null,
+                userType: userData.userType || 'student',
+                lastActive: userData.lastActive,
+                isOnline: userData.isOnline,
+                createdAt: userData.createdAt,
+                ...userData
+              }))
+              .filter(u => u.id !== user?.uid); // Exclude current user
+            
+            console.log(`👥 Processed ${usersArray.length} users (excluding current user)`);
+            setUsers(usersArray);
+            setHasData(usersArray.length > 0);
+          } else {
+            console.log('❌ No users found in database');
+            setUsers([]);
+            setHasData(false);
+          }
+        } catch (error) {
+          console.error('❌ Error loading users:', error);
           setHasData(false);
+        } finally {
+          setLoading(false);
+          setRefreshing(false);
+          resolve();
         }
-      } catch (error) {
-        console.error('❌ Error loading users:', error);
-        setHasData(false);
-      } finally {
+      }, (error) => {
+        console.error('❌ Firebase users listener error:', error);
+        console.error('Error code:', error.code, 'Message:', error.message);
         setLoading(false);
-      }
-    }, (error) => {
-      console.error('❌ Firebase users listener error:', error);
-      console.error('Error code:', error.code, 'Message:', error.message);
-      setLoading(false);
-      setHasData(false);
-    });
+        setRefreshing(false);
+        setHasData(false);
+        resolve();
+      });
 
-    // Load recent chats
+      return usersUnsubscribe;
+    });
+  };
+
+  const loadRecentChats = () => {
     const chatsRef = ref(database, 'chats/private');
     const chatsUnsubscribe = onValue(chatsRef, (snapshot) => {
       try {
@@ -92,7 +105,8 @@ const DirectMessagesScreen = ({ navigation }) => {
                   otherUserId,
                   lastMessage: lastMessage.text,
                   timestamp: lastMessage.timestamp,
-                  unread: 0
+                  unread: 0,
+                  lastMessageData: lastMessage // Store complete message data
                 });
               }
             }
@@ -107,23 +121,79 @@ const DirectMessagesScreen = ({ navigation }) => {
       }
     });
 
+    return chatsUnsubscribe;
+  };
+
+  useEffect(() => {
+    console.log('💬 DirectMessagesScreen mounted - User:', user?.email);
+    
+    if (!database) {
+      console.error('❌ Database not initialized');
+      setLoading(false);
+      return;
+    }
+
+    const usersUnsubscribe = loadUsers();
+    const chatsUnsubscribe = loadRecentChats();
+
     return () => {
       console.log('🧹 Cleaning up DirectMessagesScreen listeners');
-      off(usersRef, 'value', usersUnsubscribe);
-      off(chatsRef, 'value', chatsUnsubscribe);
+      off(ref(database, 'users'), 'value', usersUnsubscribe);
+      off(ref(database, 'chats/private'), 'value', chatsUnsubscribe);
     };
   }, [user]);
+
+  const onRefresh = async () => {
+    console.log('🔄 Manual refresh triggered');
+    setRefreshing(true);
+    await loadUsers();
+  };
 
   const startChat = (targetUser) => {
     navigation.navigate('Chat', { 
       directMessage: true,
       targetUser: {
         id: targetUser.id,
-        name: targetUser.name || targetUser.email.split('@')[0],
+        name: targetUser.name,
+        email: targetUser.email,
         profilePic: targetUser.profilePic,
         userType: targetUser.userType
       }
     });
+  };
+
+  const showProfile = async (userData) => {
+    try {
+      console.log('👤 Showing profile for:', userData);
+      
+      // Get fresh user data from Firebase to ensure we have the latest
+      const userRef = ref(database, `users/${userData.id}`);
+      
+      onValue(userRef, (snapshot) => {
+        const freshUserData = snapshot.val();
+        if (freshUserData) {
+          const completeUserData = {
+            id: userData.id,
+            name: freshUserData.name || freshUserData.displayName || (freshUserData.email ? freshUserData.email.split('@')[0] : 'User'),
+            email: freshUserData.email || 'No email',
+            profilePic: freshUserData.profilePic || freshUserData.photoURL || null,
+            userType: freshUserData.userType || 'student',
+            lastActive: freshUserData.lastActive,
+            isOnline: freshUserData.isOnline,
+            createdAt: freshUserData.createdAt,
+            ...freshUserData
+          };
+          setSelectedUser(completeUserData);
+          setShowUserProfile(true);
+        }
+      }, { onlyOnce: true });
+      
+    } catch (error) {
+      console.error('❌ Error loading user profile:', error);
+      // Fallback to the data we already have
+      setSelectedUser(userData);
+      setShowUserProfile(true);
+    }
   };
 
   const createDemoUsers = async () => {
@@ -135,6 +205,7 @@ const DirectMessagesScreen = ({ navigation }) => {
           id: 'demo_teacher_1',
           email: 'teacher.demo@synapse.com',
           name: 'Dr. Sarah Wilson',
+          displayName: 'Dr. Sarah Wilson',
           userType: 'teacher',
           profilePic: null,
           lastActive: new Date().toISOString(),
@@ -145,6 +216,7 @@ const DirectMessagesScreen = ({ navigation }) => {
           id: 'demo_student_1',
           email: 'student1.demo@synapse.com',
           name: 'Alex Johnson',
+          displayName: 'Alex Johnson',
           userType: 'student',
           profilePic: null,
           lastActive: new Date(Date.now() - 15 * 60000).toISOString(), // 15 mins ago
@@ -155,6 +227,7 @@ const DirectMessagesScreen = ({ navigation }) => {
           id: 'demo_student_2',
           email: 'student2.demo@synapse.com',
           name: 'Maria Garcia',
+          displayName: 'Maria Garcia',
           userType: 'student',
           profilePic: null,
           lastActive: new Date(Date.now() - 2 * 3600000).toISOString(), // 2 hours ago
@@ -186,11 +259,30 @@ const DirectMessagesScreen = ({ navigation }) => {
         directMessage: true,
         targetUser: {
           id: userInfo.id,
-          name: userInfo.name || userInfo.email.split('@')[0],
+          name: userInfo.name,
+          email: userInfo.email,
           profilePic: userInfo.profilePic,
           userType: userInfo.userType
         }
       });
+    } else {
+      // If user not in current list, try to fetch fresh data
+      const userRef = ref(database, `users/${chat.otherUserId}`);
+      onValue(userRef, (snapshot) => {
+        const userData = snapshot.val();
+        if (userData) {
+          navigation.navigate('Chat', {
+            directMessage: true,
+            targetUser: {
+              id: chat.otherUserId,
+              name: userData.name || userData.displayName || (userData.email ? userData.email.split('@')[0] : 'User'),
+              email: userData.email,
+              profilePic: userData.profilePic || userData.photoURL,
+              userType: userData.userType
+            }
+          });
+        }
+      }, { onlyOnce: true });
     }
   };
 
@@ -235,6 +327,7 @@ const DirectMessagesScreen = ({ navigation }) => {
     <TouchableOpacity 
       style={styles.userItem}
       onPress={() => startChat(item)}
+      onLongPress={() => showProfile(item)}
     >
       <View style={styles.avatarContainer}>
         {item.profilePic ? (
@@ -255,7 +348,7 @@ const DirectMessagesScreen = ({ navigation }) => {
       </View>
       
       <View style={styles.userInfo}>
-        <Text style={styles.userName}>{item.name || item.email.split('@')[0]}</Text>
+        <Text style={styles.userName}>{item.name}</Text>
         <View style={styles.userDetails}>
           <View 
             style={[
@@ -285,6 +378,7 @@ const DirectMessagesScreen = ({ navigation }) => {
       <TouchableOpacity 
         style={styles.recentChatItem}
         onPress={() => continueChat(item)}
+        onLongPress={() => showProfile(userInfo)}
       >
         <View style={styles.avatarContainer}>
           {userInfo.profilePic ? (
@@ -307,7 +401,7 @@ const DirectMessagesScreen = ({ navigation }) => {
         <View style={styles.chatInfo}>
           <View style={styles.chatHeader}>
             <Text style={styles.chatUserName}>
-              {userInfo.name || userInfo.email.split('@')[0]}
+              {userInfo.name}
             </Text>
             <Text style={styles.chatTime}>
               {item.timestamp ? formatLastSeen(item.timestamp) : ''}
@@ -341,6 +435,9 @@ const DirectMessagesScreen = ({ navigation }) => {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>💬 Direct Messages</Text>
+        <TouchableOpacity onPress={onRefresh} disabled={refreshing}>
+          <Text style={styles.refreshButton}>🔄</Text>
+        </TouchableOpacity>
       </View>
 
       {!hasData && !loading && (
@@ -400,8 +497,87 @@ const DirectMessagesScreen = ({ navigation }) => {
           keyExtractor={(item, index) => item.key || item.id || index.toString()}
           style={styles.list}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#6366f1']}
+              tintColor="#6366f1"
+            />
+          }
         />
       )}
+
+      {/* User Profile Modal */}
+      <Modal
+        visible={showUserProfile}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowUserProfile(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.profileModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>User Profile</Text>
+              <TouchableOpacity onPress={() => setShowUserProfile(false)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {selectedUser && (
+              <View style={styles.profileContent}>
+                {selectedUser.profilePic ? (
+                  <Image source={{ uri: selectedUser.profilePic }} style={styles.profileAvatar} />
+                ) : (
+                  <View style={[styles.profileAvatar, styles.avatarPlaceholder]}>
+                    <Text style={styles.profileAvatarText}>
+                      {selectedUser.name ? selectedUser.name.charAt(0).toUpperCase() : 'U'}
+                    </Text>
+                  </View>
+                )}
+                
+                <Text style={styles.profileName}>
+                  {selectedUser.name}
+                </Text>
+                <Text style={styles.profileEmail}>{selectedUser.email}</Text>
+                
+                <View 
+                  style={[
+                    styles.profileRoleBadge,
+                    { backgroundColor: getRoleColor(selectedUser.userType) }
+                  ]}
+                >
+                  <Text style={styles.profileRoleText}>
+                    {getRoleLabel(selectedUser.userType)}
+                  </Text>
+                </View>
+
+                <View style={styles.profileStatus}>
+                  <View 
+                    style={[
+                      styles.statusIndicator,
+                      isUserOnline(selectedUser) ? styles.statusOnline : styles.statusOffline
+                    ]} 
+                  />
+                  <Text style={styles.profileStatusText}>
+                    {isUserOnline(selectedUser) ? 'Online' : `Last seen ${formatLastSeen(selectedUser.lastActive)}`}
+                  </Text>
+                </View>
+
+                <TouchableOpacity 
+                  style={styles.messageUserButton}
+                  onPress={() => {
+                    startChat(selectedUser);
+                    setShowUserProfile(false);
+                  }}
+                >
+                  <Text style={styles.messageUserButtonText}>💬 Send Message</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -424,6 +600,9 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 20,
     paddingTop: 60,
     backgroundColor: '#6366f1',
@@ -432,7 +611,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
-    textAlign: 'center',
+  },
+  refreshButton: {
+    fontSize: 20,
+    color: '#fff',
+    padding: 8,
   },
   list: {
     flex: 1,
@@ -626,6 +809,106 @@ const styles = StyleSheet.create({
     marginTop: 20,
     fontStyle: 'italic',
   },
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  profileModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '60%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#334155',
+  },
+  closeButton: {
+    fontSize: 20,
+    color: '#64748b',
+    fontWeight: 'bold',
+  },
+  profileContent: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  profileAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 16,
+  },
+  profileAvatarText: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: 'bold',
+  },
+  profileName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#334155',
+    marginBottom: 4,
+  },
+  profileEmail: {
+    fontSize: 16,
+    color: '#64748b',
+    marginBottom: 12,
+  },
+  profileRoleBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  profileRoleText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  profileStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusOnline: {
+    backgroundColor: '#10b981',
+  },
+  statusOffline: {
+    backgroundColor: '#94a3b8',
+  },
+  profileStatusText: {
+    fontSize: 14,
+    color: '#64748b',
+  },
+  messageUserButton: {
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  messageUserButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
 });
 
-export default DirectMessagesScreen;
+export default DirectMessagesScreen; 
